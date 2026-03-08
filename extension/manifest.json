@@ -11,11 +11,5 @@
   ],
   "action": {
     "default_popup": "popup.html"
-  },
-  "env": [
-    {
-      "key": "ANTHROPIC_API_KEY",
-      "value": "REPLACE_WITH_YOUR_KEY"
-    }
-  ]
+  }
 }
