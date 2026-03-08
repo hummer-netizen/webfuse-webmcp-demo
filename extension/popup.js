@@ -51,6 +51,15 @@ const TOOLS = [
     }
   },
   {
+    name: 'scroll',
+    description: 'Scroll the page up or down.',
+    input_schema: {
+      type: 'object',
+      properties: { direction: { type: 'string', enum: ['up', 'down'] } },
+      required: ['direction']
+    }
+  }
+  {
     name: 'done',
     description: 'Signal task is complete with a brief summary of what was accomplished.',
     input_schema: {
@@ -63,7 +72,7 @@ const TOOLS = [
 
 const SYSTEM_PROMPT = `You are a web automation agent running inside a Webfuse-proxied browser session. You have structured access to any website — real auth, real cookies, real state — without requiring the site to implement WebMCP.
 
-Tools: snapshot (see page), click, fill, navigate, done (signal completion).
+Tools: snapshot (see page), click, fill, navigate, scroll (up/down), done (signal completion).
 
 Rules:
 1. Always start with snapshot to understand the current page
@@ -171,6 +180,7 @@ async function runAgent(userGoal) {
       else if (name === 'click') result = await callPageTool('CLICK', input);
       else if (name === 'fill')  result = await callPageTool('FILL', input);
       else if (name === 'navigate') result = await callPageTool('NAVIGATE', input);
+      else if (name === 'scroll')   result = await callPageTool('SCROLL', input);
       else result = { error: `Unknown tool: ${name}` };
 
       toolResults.push({
@@ -202,4 +212,4 @@ inputEl.addEventListener('keydown', (e) => {
 });
 
 // Welcome hint
-addMessage('system', 'Try: "Find the search bar and search for climate change" or "Summarize what\'s on this page"');
+addMessage('system', 'Suggestions:\n• "Search for machine learning"\n• "Summarise this page"\n• "Click the first link in the article"\n• "Find the search box and look up AI agents"');
