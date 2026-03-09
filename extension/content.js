@@ -11,7 +11,7 @@
  * - Snapshot runs in requestAnimationFrame to avoid blocking input
  */
 
-const MODEL = 'claude-haiku-3-5';
+const MODEL = 'claude-sonnet-4-6';
 const MAX_TURNS = 10;
 
 // ── Shadow DOM host ────────────────────────────────────────────────────────
