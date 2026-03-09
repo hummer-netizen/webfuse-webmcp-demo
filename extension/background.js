@@ -2,25 +2,24 @@
  * background.js — Message hub
  * Routes: sidepanel ↔ content script (tool calls)
  *         sidepanel → Anthropic API (Claude calls, streamed)
+ * Opens sidepanel automatically on session start.
  */
 const PROXY_URL = 'https://proxy.webfuse.it';
 
-// Auto-open sidepanel when extension icon is clicked
+// Auto-open sidepanel on every new tab/navigation
 browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+// Open immediately for all tabs
+browser.sidePanel.open();
 
 browser.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === 'CLAUDE_API') {
-    // From sidepanel — stream Claude response
     const { reqId, payload } = message;
     payload.stream = true;
-    // Send stream events back to sidepanel (use runtime.sendMessage, not tabs)
     streamClaude(reqId, payload, sender);
   } else if (message?.type === 'TOOL_EXEC') {
-    // From sidepanel — relay to content script on active tab
     const { reqId, name, input } = message;
     browser.tabs.sendMessage(null, { type: 'TOOL_EXEC', reqId, name, input });
   } else if (message?.type === 'TOOL_RESULT') {
-    // From content script — relay back to sidepanel
     browser.runtime.sendMessage(message);
   }
 });
