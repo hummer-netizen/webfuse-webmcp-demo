@@ -1,116 +1,88 @@
-# Demo Script — WebMCP Bridge Demo 🎬
+# Demo Script — Webfuse + WebMCP 🎬
 
-A 5-minute walkthrough for showing this to developers, investors, or potential customers.
+A 5-minute walkthrough for developers, investors, or potential customers.
 
 ---
 
-## Setup (30 seconds before you start)
+## Setup (30 seconds)
 
-1. Open **[webfu.se/+hummerbot/](https://webfu.se/+hummerbot/)** in Chrome
-2. The page loads Wikipedia's AI article — that's the start page
-3. Look for the Webfuse extension popup button (appears in the session UI)
-4. Have the GitHub repo open in another tab: **[github.com/hummer-netizen/webfuse-webmcp-demo](https://github.com/hummer-netizen/webfuse-webmcp-demo)**
+1. Open **[webfu.se/+bookingcom-agent-demo](https://webfu.se/+bookingcom-agent-demo)** in Chrome
+2. The Webfuse Agent sidepanel opens automatically on the right
+3. Booking.com loads on the left — fully functional, real site
 
 ---
 
 ## The One-Line Pitch
 
-> "GPT-5.4 just launched computer-use that works from screenshots. This demo does the same thing from structured DOM access — faster, more reliable, and in the user's real browser session."
+> "Chrome 146 ships WebMCP — structured tools for AI agents. But it only works if sites implement it. Webfuse lets YOU define the tools, on any site, today."
 
 ---
 
-## Demo Flow 1 — The Quick Wow (60 seconds)
+## Demo Flow 1 — The Wow Moment (90 seconds)
 
 **What to say:**
-> "This is a live website — Wikipedia — loaded through Webfuse. Watch what happens when I give the agent a task."
+> "This is the real Booking.com, loaded through Webfuse. On the right is an AI agent with custom semantic tools injected by a Webfuse extension. Watch."
 
-**Type in the popup:**
+**Type in the sidepanel:**
 ```
-Search for "WebMCP" using the search bar, then summarise what comes up
+Search for hotels in Amsterdam, April 1-3, 2 guests
 ```
 
-**What the agent does:**
-- Calls `snapshot()` → reads the page
-- Calls `fill()` on the search input
-- Calls `click()` on the search button
-- Navigates to results
-- Calls `snapshot()` again
-- Returns a summary
+**What happens:**
+- Agent calls `search_hotels({destination: "Amsterdam", checkin: "2026-04-01", checkout: "2026-04-03", guests: 2})`
+- The extension fills the destination field, handles the date picker, sets guest count, and clicks search — all in one tool call
+- Results appear on Booking.com
 
-**Talking point while it runs:**
-> "Notice it's not taking screenshots and guessing where to click. It's reading a structured representation of the page — headings, interactive elements, ARIA labels. That's why it's fast and doesn't break when the layout changes."
+**What to say after:**
+> "That was one tool call. Without Webfuse, an AI agent would need 10+ turns — click the date field, navigate the calendar, click April, click the 1st, click the 3rd, find the guest dropdown, click plus twice... and it breaks every time the UI changes."
 
 ---
 
-## Demo Flow 2 — The Architecture Point (90 seconds)
+## Demo Flow 2 — The Filter (60 seconds)
+
+**Type:**
+```
+Filter by 4+ stars, under €150/night
+```
+
+**What happens:**
+- Agent calls `apply_filters({rating_min: 4, price_max: 150})`
+- Extension interacts with Booking.com's filter sidebar
 
 **What to say:**
-> "Let me show you what's actually happening under the hood."
-
-Open the GitHub repo. Point to the file structure:
-
-```
-extension/content.js   ← runs inside the proxied page
-extension/popup.js     ← the UI, calls our proxy
-proxy/worker.js        ← holds the API key server-side
-```
-
-**Key talking point:**
-> "The API key never touches the browser. The popup calls our proxy, which calls Anthropic. Compare that to Claude in Chrome — which requires a browser extension install per user. This runs at the proxy layer. Zero client install."
-
-**Then show the manifest.json:**
-> "This is a Webfuse Extension. Structurally identical to a browser extension — manifest, content script, popup — but deployed at the proxy layer. It's live on every session without users installing anything."
+> "The AI builder defines these tools — not Booking.com. That's the key difference from WebMCP."
 
 ---
 
-## Demo Flow 3 — The Real-World Relevance (2 minutes)
+## Demo Flow 3 — The Cross-Site Story (no live demo, just narrative)
 
 **What to say:**
-> "Let's talk about why this matters right now."
-
-Navigate to `https://en.wikipedia.org/wiki/Artificial_intelligence` within the space, then:
-
-**Type in the popup:**
-```
-Find the table of contents and click on the "Applications" section
-```
-
-**While it runs, talk through the landscape:**
-
-> "This week: Google shipped WebMCP in Chrome 146. OpenAI shipped GPT-5.4 with computer-use. Anthropic shipped Claude in Chrome. Everyone's racing to give AI agents web access.
->
-> Here's the problem they haven't solved: **your user's web**. Not a sandboxed browser. The actual live app your user is logged into.
->
-> WebMCP requires site owners to implement it — that won't happen for years. GPT-5.4 computer-use works from screenshots, which is slow and breaks on every UI update. Claude in Chrome needs a browser extension install, which IT blocks at enterprise.
->
-> Webfuse is the bridge. Proxy layer. Real session. No install. Any site. Today."
+> "Now imagine this journey continues: the user picks a hotel, authenticates with their company SSO, signs a travel policy form on DocuSign, and pays via corporate Stripe. WebMCP breaks the moment one of those sites doesn't implement it. Webfuse proxies the entire session — every site, every step."
 
 ---
 
-## If Something Goes Wrong
+## Key Talking Points
 
-**Agent says 'element not found':**
-> "This happens occasionally with dynamic sites — the selector missed. The agent retries automatically. In production you'd tune the snapshot strategy for your specific app."
+**If asked "How is this different from Playwright?"**
+> "Playwright runs in a headless browser in the cloud. This runs in the user's real browser — their real session, real auth, real cookies. No credential sharing, no anti-bot detection."
 
-**Agent loops / takes too many steps:**
-> "It's being thorough. Max 10 turns. You can cut it off and try a simpler goal."
+**If asked "Why wouldn't sites just implement WebMCP?"**
+> "Would Booking.com help AI agents skip their conversion funnel? The incentive isn't there. The parties who want automation are the AI builders, agencies, and enterprises — Webfuse gives them the power."
 
-**Proxy times out:**
-> The Cloudflare tunnel occasionally resets. If the proxy URL is dead, run: `~/webfuse-proxy/start.sh` and update `PROXY_URL` in popup.js.
+**If asked "What happens when WebMCP is widely adopted?"**
+> "Webfuse still wins on three things WebMCP never covers: cross-site journeys, tools defined by third parties, and legacy apps that will never implement a new standard."
 
----
-
-## The Leave-Behind
-
-Send people to:
-- **Demo:** [webfu.se/+hummerbot/](https://webfu.se/+hummerbot/)
-- **Code:** [github.com/hummer-netizen/webfuse-webmcp-demo](https://github.com/hummer-netizen/webfuse-webmcp-demo)
-- **Blog post:** [github.com/hummer-netizen/webfuse-webmcp-demo/blob/main/blog/webmcp-bridge.md](https://github.com/hummer-netizen/webfuse-webmcp-demo/blob/main/blog/webmcp-bridge.md)
-- **Webfuse:** [webfuse.com](https://webfuse.com)
+**If asked about scale/enterprise:**
+> "Webfuse is SOC2 Type II, ISO 27001, 99.99% uptime. 12+ years of underlying proxy technology. This isn't a hack — it's production infrastructure."
 
 ---
 
-## One More Angle (for technical audiences)
+## Closing
 
-> "The interesting thing is this demo uses Claude Sonnet, but it's model-agnostic. You could swap in GPT-5.4, Gemini, or any model with tool calling. Webfuse is the infrastructure layer — it doesn't care which brain is driving."
+> "WebMCP asks websites to cooperate. Webfuse doesn't have to ask."
 
+Links:
+- Demo: webfu.se/+bookingcom-agent-demo
+- Blog: [link to published post]
+- Source: github.com/hummer-netizen/webfuse-webmcp-demo
+- Webfuse: webfuse.com
