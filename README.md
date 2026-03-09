@@ -80,6 +80,14 @@ curl -X POST https://api.webfu.se/api/spaces/YOUR_SPACE_ID/extensions/github/ \
 
 Read the full analysis: **[WebMCP Asks Websites to Cooperate. Webfuse Doesn't Have to Ask.](blog/webmcp-bridge.md)**
 
+## Distribution
+
+Marketing materials in `marketing/`:
+- `devto-post.md` — Dev.to article (ready to publish)
+- `hackernews.md` — HN submission + first comment
+- `reddit-posts.md` — r/AI_Agents, r/webdev, r/LocalLLaMA
+- `twitter-thread.md` — 8-tweet thread + standalone
+
 ## License
 
 MIT
