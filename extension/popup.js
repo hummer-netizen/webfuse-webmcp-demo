@@ -3,7 +3,7 @@
  * Orchestrates: user input → Claude (via secure proxy) → page actions → repeat
  */
 
-const PROXY_URL = 'https://strengths-township-incurred-boating.trycloudflare.com';
+const PROXY_URL = 'https://proxy.webfuse.it';
 const MODEL = 'claude-sonnet-4-6';
 const MAX_TURNS = 10;
 
