@@ -114,8 +114,9 @@ Open it. Tell the agent what to do. Watch it work.
 If you're building AI agents that need to interact with real authenticated web apps — voice agents, workflow automation, enterprise tooling — Webfuse is the missing layer.
 
 **[→ Try the live demo](https://webfu.se/+hummerbot/)**
-**[→ View the code](https://github.com/hummer-netizen/webfuse-webmcp-demo)**
+**[→ View the code on GitHub](https://github.com/hummer-netizen/webfuse-webmcp-demo)**
 **[→ Get started with Webfuse](https://webfuse.com)**
+**[→ Talk to the team](https://webfuse.com/contact)**
 
 ---
 

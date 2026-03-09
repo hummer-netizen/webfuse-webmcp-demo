@@ -45,6 +45,7 @@ function takeSnapshot() {
   const allElements = collectInteractive(document.body);
   allElements.forEach((el) => {
     if (!isVisible(el)) return;
+    if (el.disabled || el.getAttribute('aria-disabled') === 'true') return;
     const selector = stableSelector(el);
     if (!selector || seen.has(selector)) return;
     seen.add(selector);
@@ -124,10 +125,16 @@ function performFill(selector, value) {
   const el = resolveElement(selector);
   if (!el) return { error: `Element not found: ${selector}` };
   el.focus();
-  const nativeSetter = Object.getOwnPropertyDescriptor(
-    el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
-    'value'
-  )?.set;
+  if (el.tagName === 'SELECT') {
+    // For <select>: set value directly and dispatch change
+    el.value = value;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return { ok: true, filled: selector, value, selectedText: el.options[el.selectedIndex]?.text };
+  }
+  const proto = el.tagName === 'TEXTAREA'
+    ? window.HTMLTextAreaElement.prototype
+    : window.HTMLInputElement.prototype;
+  const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
   if (nativeSetter) nativeSetter.call(el, value);
   else el.value = value;
   el.dispatchEvent(new Event('input', { bubbles: true }));
