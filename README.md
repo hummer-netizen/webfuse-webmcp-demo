@@ -1,50 +1,122 @@
 # WebMCP Bridge Demo 🌐
 
-> **WebMCP is coming. Webfuse is already here.**
+> **AI agents shouldn't need to wait for websites to implement WebMCP. This demo proves they don't.**
 
-A working AI agent that sees and controls any website through [Webfuse](https://webfuse.com) — giving you WebMCP-grade browser automation on every site, today, without waiting for sites to implement the spec.
+A Claude-powered agent that sees and controls any website through [Webfuse](https://webfuse.com) — real browser session, real auth, zero client install. Built as a Webfuse Extension (content script + popup UI).
 
-## What This Is
+**[→ Try it live at webfu.se/+hummerbot/](https://webfu.se/+hummerbot/)**
 
-A Webfuse Extension (popup + content script) that embeds a Claude-powered agent into any website proxied through a Webfuse Space. The agent can:
+---
 
-- 📸 **Snapshot** — Read the current page state as structured JSON (URL, visible text, interactive elements + selectors)
-- 🖱️ **Click** — Click any element by CSS selector
-- ✏️ **Fill** — Fill form fields
-- 🧭 **Navigate** — Go to any URL
-- ✅ **Done** — Signal task completion with a summary
+## What the Agent Can Do
 
-## Live Demo
+| Tool | What it does |
+|------|-------------|
+| `snapshot` | Reads the full page state — URL, headings, visible text, all interactive elements with stable selectors |
+| `click` | Clicks any element (buttons, links, menu items) |
+| `fill` | Fills form fields — works on React apps too |
+| `navigate` | Goes to any URL |
+| `scroll` | Scrolls up or down for long pages |
+| `done` | Signals task complete with a summary |
 
-Try it at: **[webfu.se/+hummerbot/](https://webfu.se/+hummerbot/)**
+---
 
-The space proxies any URL you navigate to, with the agent widget available in the top-right corner.
-
-## How It Works
+## Architecture
 
 ```
-User types goal
-    ↓
-Claude receives goal + page snapshot
-    ↓
-Claude decides: click / fill / navigate / snapshot
-    ↓
-Webfuse content script executes action on live page
-    ↓
-Repeat until done
+┌─────────────────────────────────────────────────────────┐
+│                    User's Browser                        │
+│                                                          │
+│  ┌──────────────────────────────────────┐               │
+│  │     Webfuse Proxied Session           │               │
+│  │   (any website, real auth/cookies)   │               │
+│  │                                      │               │
+│  │  ┌─────────────┐  ┌──────────────┐  │               │
+│  │  │  content.js  │  │  popup.html  │  │               │
+│  │  │  (injected)  │◄─│  (agent UI)  │  │               │
+│  │  │              │  │              │  │               │
+│  │  │ • snapshot() │  │ User types   │  │               │
+│  │  │ • click()    │  │ goal →       │  │               │
+│  │  │ • fill()     │  │ Claude loop  │  │               │
+│  │  │ • scroll()   │  │             │  │               │
+│  │  └─────────────┘  └──────┬───────┘  │               │
+│  └─────────────────────────┼───────────┘               │
+└────────────────────────────┼────────────────────────────┘
+                             │ HTTPS (no API key in browser)
+                    ┌────────▼────────┐
+                    │  Proxy Server   │
+                    │ (holds API key) │
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │  Anthropic API  │
+                    │  Claude Sonnet  │
+                    └─────────────────┘
 ```
 
-The key insight: Webfuse runs in the **user's real browser session** — real cookies, real auth, real state. No isolated headless browser. No auth re-setup. No fragile Playwright scripts.
+**Key principle:** The Anthropic API key never touches the browser. The popup calls a proxy server which holds the key server-side.
 
-## Setup (Self-Hosted)
+---
 
-### 1. Create a Webfuse Space
+## How a Task Runs
 
-Sign up at [webfuse.com](https://webfuse.com) and create a Space. Note your Space ID and REST key.
+```
+You:   "Search for 'AI agents' and open the first result"
 
-### 2. Deploy This Extension
+Agent → snapshot()
+      ← { url, title, interactive: [{ selector: "#searchInput", type: "input" }, ...] }
 
-Via the Webfuse API:
+Agent → fill("#searchInput", "AI agents")
+      ← { ok: true }
+
+Agent → click("button[type=submit]")
+      ← { ok: true }
+
+Agent → snapshot()
+      ← { interactive: [{ type: "a", text: "AI Agents - Wikipedia", href: "/wiki/..." }, ...] }
+
+Agent → click("a[text='AI Agents - Wikipedia']")
+      ← { ok: true }
+
+Agent → done("Searched for 'AI agents' and opened the Wikipedia article")
+```
+
+---
+
+## Run Your Own
+
+### Prerequisites
+- A [Webfuse](https://webfuse.com) account with a Space
+- An [Anthropic](https://console.anthropic.com) API key
+
+### 1 — Deploy the Proxy
+
+The proxy holds your Anthropic API key server-side. Choose one:
+
+**Option A: Cloudflare Worker (recommended)**
+```bash
+cd proxy
+npm install -g wrangler
+wrangler login
+wrangler secret put ANTHROPIC_API_KEY   # paste your key when prompted
+wrangler deploy                          # get a *.workers.dev URL
+```
+
+**Option B: Run locally + tunnel**
+```bash
+ANTHROPIC_API_KEY=sk-ant-... node proxy/server.js &
+cloudflared tunnel --url http://127.0.0.1:3001
+# Note the *.trycloudflare.com URL
+```
+
+### 2 — Update the Extension
+
+In `extension/popup.js`, set `PROXY_URL` to your proxy URL:
+```js
+const PROXY_URL = 'https://your-proxy.workers.dev';
+```
+
+### 3 — Deploy the Extension to Your Space
 
 ```bash
 curl -X POST https://api.webfu.se/api/spaces/{SPACE_ID}/extensions/github/ \
@@ -58,35 +130,46 @@ curl -X POST https://api.webfu.se/api/spaces/{SPACE_ID}/extensions/github/ \
   }'
 ```
 
-### 3. Set Your Anthropic API Key
+> Get your `SPACE_ID`, `REST_KEY`, and `STORAGE_APP_ID` from your Webfuse dashboard.
 
-Edit `extension/manifest.json` and replace `REPLACE_WITH_YOUR_KEY` with your Anthropic API key.
+### 4 — Open Your Space
 
-### 4. Open Your Space
+Go to your Space URL. The agent widget appears as a popup button. Click it, type a goal, watch it work.
 
-Navigate to your Webfuse Space URL. Click the extension popup. Give the agent a task.
+---
 
 ## File Structure
 
 ```
-extension/
-├── manifest.json   # Extension metadata + env vars (API key)
-├── content.js      # Page snapshot + action execution (injected into site)
-├── popup.html      # Agent chat UI
-└── popup.js        # Claude orchestration + tool calling loop
-
-blog/
-└── webmcp-bridge.md  # Accompanying blog post
+webfuse-webmcp-demo/
+├── extension/
+│   ├── manifest.json   Webfuse Extension manifest
+│   ├── content.js      Page snapshot + actions (injected into proxied site)
+│   ├── popup.html      Agent chat UI
+│   └── popup.js        Claude tool-calling loop (calls proxy, not Anthropic directly)
+├── proxy/
+│   ├── worker.js       Cloudflare Worker — production proxy
+│   ├── wrangler.toml   Worker config
+│   ├── server.js       Node.js alternative proxy
+│   └── README.md       Proxy setup guide
+└── blog/
+    └── webmcp-bridge.md  "Your AI Agent Has a Brain. Give It Hands."
 ```
-
-## The Bigger Picture
-
-[WebMCP](https://github.com/w3c-webmcp) (shipping in Chrome 146) lets AI agents interact with websites as structured tool endpoints — but requires site owners to implement it. That's going to take years.
-
-Webfuse bridges the gap: proxy-layer augmentation that gives agents structured, programmatic access to **any** site, **today**.
-
-Read the full writeup: [blog/webmcp-bridge.md](blog/webmcp-bridge.md)
 
 ---
 
-Built with ❤️ by [Hummer](https://github.com/hummer-netizen) · Powered by [Webfuse](https://webfuse.com)
+## Why This Approach
+
+| | Webfuse | Claude in Chrome | OpenAI Operator | Playwright |
+|--|---------|-----------------|-----------------|------------|
+| Real user session | ✅ | ✅ | ❌ | ❌ |
+| No client install | ✅ | ❌ | ✅ | ✅ |
+| Embed in your product | ✅ | ❌ | ⚠️ | ✅ |
+| IT-friendly | ✅ | ❌ | ✅ | ✅ |
+| WebMCP-ready | ✅ | ❌ | ❌ | ❌ |
+
+Read the full writeup: **[blog/webmcp-bridge.md](blog/webmcp-bridge.md)**
+
+---
+
+Built by [Hummer](https://github.com/hummer-netizen) · Powered by [Webfuse](https://webfuse.com) + [Claude](https://anthropic.com)
