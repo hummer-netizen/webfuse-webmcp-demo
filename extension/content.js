@@ -4,7 +4,6 @@
  * The full agent loop runs here — no popup click needed.
  */
 
-const PROXY_URL = 'https://proxy.webfuse.it';
 const MODEL = 'claude-sonnet-4-6';
 const MAX_TURNS = 10;
 
@@ -251,20 +250,15 @@ function execTool(name, input) {
   return { error: `Unknown tool: ${name}` };
 }
 
-// ── Claude API ─────────────────────────────────────────────────────────────
-async function callClaude(messages, retries = 2) {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(`${PROXY_URL}/v1/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM, tools: TOOLS, messages }),
-      });
-      if (res.status === 429 || res.status >= 500) { if (attempt < retries) { await sleep((attempt + 1) * 1500); continue; } }
-      if (!res.ok) throw new Error(`Proxy ${res.status}: ${(await res.text()).slice(0, 150)}`);
-      return res.json();
-    } catch (e) { if (attempt < retries && e.name !== 'SyntaxError') { await sleep((attempt + 1) * 1500); continue; } throw e; }
-  }
+// ── Claude API (via background script — avoids Webfuse proxy interception) ──
+async function callClaude(messages) {
+  const response = await browser.runtime.sendMessage({
+    type: 'CLAUDE_API',
+    payload: { model: MODEL, max_tokens: 1024, system: SYSTEM, tools: TOOLS, messages }
+  });
+  if (!response) throw new Error('No response from background script');
+  if (response.error) throw new Error(response.error);
+  return response;
 }
 
 // ── Agent loop ─────────────────────────────────────────────────────────────
