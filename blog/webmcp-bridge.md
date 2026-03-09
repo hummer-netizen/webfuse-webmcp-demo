@@ -1,123 +1,172 @@
-# Your AI Agent Has a Brain. Give It Hands.
+# WebMCP Asks Websites to Cooperate. Webfuse Doesn't Have to Ask.
 
-Every major AI lab is racing to give agents access to the web. Anthropic shipped Claude in Chrome. Google shipped WebMCP in Chrome 146. Vercel shipped agent-browser. OpenAI shipped Operator.
+Chrome 146 shipped today. With it comes WebMCP — a new standard that lets websites expose structured tools for AI agents. No more blind DOM clicking. Sites publish endpoints; agents call them like APIs.
 
-They all demo beautifully. They all hit the same wall: **your user's web**.
+It's elegant. It's the right direction. And it will take years to matter.
 
-Not a sandboxed demo page. Not a headless test environment. The live, authenticated website your user is already logged into — with their real account, their real session, their real data. The system your voice agent needs to update. The portal your workflow tool needs to read.
-
-That's the gap. And every production team building with AI agents hits it sooner or later.
+Here's why — and what you should build on instead.
 
 ---
 
-## The Browser Agent Landscape Right Now
+## The WebMCP Promise (and Its Three Fatal Assumptions)
 
-Let's map the territory honestly.
+WebMCP assumes three things:
 
-**Anthropic's Claude in Chrome** — a browser extension that lets Claude see and control your browser tabs. Great for personal productivity. Requires a browser extension install per user. Enterprise IT departments block extension installs routinely. Doesn't scale to 10,000 users.
+1. **That site owners will implement it.** They won't — at least not fast. Why would Booking.com help your AI agent bypass their carefully designed conversion funnel? Every structured tool they expose is a user who *doesn't* see their upsells, their ads, their "recommended for you" carousel. The incentive isn't there.
 
-**OpenAI Operator** — spins up an isolated cloud browser to complete tasks. Fast to set up, impressive demos. But it's *their* browser, not *your user's* browser. The moment a task requires an authenticated session — booking travel on a corporate account, checking a patient's medical portal, processing an order in your company's ERP — it hits a wall. Users don't want to hand over credentials to a cloud service they don't control.
+2. **That one site is enough.** Real journeys cross boundaries. A travel agent's AI doesn't just search hotels — it searches Booking.com, authenticates via SSO, signs a contract on DocuSign, processes payment through Stripe, and sends a confirmation email. If *any* step in that chain doesn't support WebMCP, the whole automation breaks. Legacy apps will never implement it. Payment providers won't prioritize it. That one uncooperative site in the chain becomes your bottleneck.
 
-**Playwright / Puppeteer** — the developer default. Powerful, but headless. Anti-bot systems block them. Session management is a nightmare. They break when a site updates its markup. At scale, you're maintaining a fragile fleet of scraping scripts instead of building your product.
+3. **That the site owner is the right party to define the tools.** This is the deepest problem. WebMCP puts responsibility on the *publisher*. But the party who actually wants AI automation isn't the site owner — it's the *business building on top*. The travel agency layering expertise over Booking.com. The insurance broker comparing quotes across five portals. The HR consultancy automating applications across job boards. These value-adders need to define their own tools, on sites they don't own.
 
-**WebMCP** (shipping in Chrome 146) — the most elegant solution on this list. Sites publish structured MCP endpoints; agents call them like APIs. No DOM parsing, no selector maintenance. Clean, fast, reliable. Also: requires every site to implement it, which won't happen for years.
-
-All of these are genuinely useful. None of them solves the core problem for teams building production-grade AI features: **how do you give an agent reliable, authenticated, low-latency access to an existing web application — without asking users to install anything, hand over credentials, or wait for that site to adopt a new standard?**
+WebMCP is cooperation from the inside. What the market needs is **augmentation from the outside**.
 
 ---
 
-## The Proxy Layer Approach
+## What Augmentation From the Outside Looks Like
 
-Webfuse takes a different architectural path.
+Webfuse is a proxy that sits between the user's browser and the web. The user browses normally — their real session, real cookies, real auth. Webfuse intercepts the page and lets you inject an extension layer that gives AI agents:
 
-Instead of launching a new browser, it sits *between* the user's browser and the website. The user's real browser loads the real site — with their real auth, their real cookies, their real session state — through the Webfuse proxy. Webfuse then injects a sandboxed extension layer that gives your AI agent:
+- **Structured snapshots** of any page — headings, interactive elements, form fields, stable selectors
+- **Actions** — click, fill, navigate, scroll — on the user's live session
+- **Custom semantic tools** — you define them, on any site, without the site's permission
 
-- **Eyes**: A structured, LLM-readable snapshot of the current page — headings, visible text, interactive elements with stable selectors, ARIA labels
-- **Hands**: Programmatic control — clicks, form fills, navigation, real-time feedback after each action
+This means the travel agency can build `search_hotels({destination, dates, guests})` as a tool that wraps Booking.com's complex form interactions internally. The AI agent calls one function. The extension handles the date picker, the guest counter, the autocomplete dropdown — all the UI complexity that breaks generic automation.
 
-The user sees the site they always see. The agent sees a structured representation of it. No extension required on the user's end. No credential sharing. No sandboxed cloud browser.
-
-This is what WebMCP will eventually enable natively, on every site that implements it. Webfuse delivers it today, on any site, without asking anyone to change anything.
+The site didn't implement anything. Webfuse added the intelligence from outside.
 
 ---
 
-## What This Looks Like in Practice
+## Watch the Difference
 
-Here's the agent loop running against a live page through Webfuse:
+Here's an AI agent booking a hotel on Booking.com. First, the hard way:
 
 ```
-User: "Find the contact form and send a message asking about enterprise pricing"
+Agent → snapshot()              # 5,283 elements on the page
+Agent → click("#destination")   # focus the search field
+Agent → fill("#destination", "Amsterdam")
+Agent → wait for autocomplete...
+Agent → click(autocomplete suggestion)  # which one? hope for the best
+Agent → click(date field)
+Agent → navigate calendar to April...
+Agent → click(April 1)
+Agent → click(April 3)
+Agent → click(guest dropdown)
+Agent → click(+ button for adults)  # twice? three times?
+Agent → click(search button)
 
-Agent → snapshot()
-→ { url: "https://example.com", title: "...", interactive: [
-     { type: "a", text: "Contact", href: "/contact", selector: "a[href='/contact']" },
-     ...
-  ]}
-
-Agent → click("a[href='/contact']")
-→ { ok: true }
-
-Agent → snapshot()
-→ { interactive: [
-     { type: "input", inputType: "text", selector: "#name", text: "Your name" },
-     { type: "input", inputType: "email", selector: "#email" },
-     { type: "textarea", selector: "#message" },
-     { type: "button", text: "Send", selector: "button[type=submit]" }
-  ]}
-
-Agent → fill("#name", "Alex Chen")
-Agent → fill("#email", "alex@company.com")
-Agent → fill("#message", "Hi, I'd like to learn about enterprise pricing...")
-Agent → click("button[type=submit]")
-→ { ok: true }
-
-Agent → done("Submitted contact form with enterprise pricing inquiry")
+# 10+ turns. Fragile selectors. Calendar navigation breaks constantly.
+# The guest counter has nested +/- buttons that change IDs on every render.
 ```
 
-Each step happens on the user's live session. No credential hand-off. No extension install. No Playwright script to maintain.
+Now with Webfuse semantic tools:
+
+```
+Agent → search_hotels({
+  destination: "Amsterdam",
+  checkin: "2026-04-01",
+  checkout: "2026-04-03",
+  guests: 2
+})
+
+# 1 turn. Always works. The extension handles the UI complexity internally.
+```
+
+**[→ Try it live: webfu.se/+bookingcom-agent-demo](https://webfu.se/+bookingcom-agent-demo)**
 
 ---
 
-## Webfuse vs The Alternatives
+## Why This Can't Wait for WebMCP
 
-|  | Webfuse | Claude in Chrome | Operator / Remote Browser | Playwright |
-|--|---------|-----------------|--------------------------|------------|
-| Real user session | ✅ | ✅ | ❌ | ❌ |
-| No client install | ✅ | ❌ | ✅ | ✅ |
-| Works on any site today | ✅ | ✅ | ✅ | ✅ |
-| Embed in your product | ✅ | ❌ | ⚠️ | ✅ |
-| Survives UI updates | ✅ | ⚠️ | ⚠️ | ❌ |
-| IT-friendly (no extension) | ✅ | ❌ | ✅ | ✅ |
-| WebMCP-ready path | ✅ | ❌ | ❌ | ❌ |
+Even in a world where WebMCP is universally adopted (optimistically: 2028+), Webfuse solves three things WebMCP never will:
 
----
+### 1. Cross-Site Journeys
 
-## The WebMCP Bridge
+No standard covers a journey that spans Booking.com → DocuSign → Stripe → Gmail. WebMCP is per-site, per-page. Webfuse proxies the *entire session* — one proxy, full journey control, regardless of how many sites or third-party apps are involved.
 
-Here's the thing: Webfuse and WebMCP aren't in competition. They're complementary.
+### 2. Third-Party Value Creation
 
-As sites adopt WebMCP, Webfuse can route agent calls to native endpoints — giving you clean structured access when it's available, and proxy-layer access when it isn't. You write your integration once. The underlying transport gets better as the ecosystem matures.
+The most valuable AI applications are built by businesses who *combine* web resources with domain expertise. A travel advisor who searches five booking sites and recommends the best option. An insurance broker who compares quotes across carriers. A recruiting firm that automates applications across job boards.
 
-**Today**: Agent → Webfuse proxy → any website
-**2027+**: Agent → Webfuse → WebMCP endpoint (if available) or proxy fallback
+None of these businesses own the sites they automate. WebMCP gives them nothing. Webfuse gives them everything.
 
-Your agent code doesn't change. The world underneath it improves.
+### 3. Legacy and Uncooperative Sites
+
+That internal ERP from 2014. The government portal that hasn't been updated since 2019. The payment provider that will never prioritize WebMCP. These sites aren't going anywhere, and neither is the need to automate them. Webfuse doesn't need their cooperation.
 
 ---
 
-## Try It Live
+## The Architecture
 
-The demo at **[webfu.se/+hummerbot/](https://webfu.se/+hummerbot/)** shows a Claude-powered agent operating on a live page through Webfuse — snapshot, click, fill, navigate — with nothing but tool calls.
+```
+┌──────────────────────────────────────────────┐
+│  User's Browser (real session, real auth)     │
+│  ┌────────────┐  ┌────────────────────────┐  │
+│  │ Any Website │  │ Webfuse Extension Layer │  │
+│  │ (unchanged) │  │ • Semantic tools        │  │
+│  │             │  │ • Page snapshots        │  │
+│  │             │  │ • AI agent sidebar      │  │
+│  └──────┬──────┘  └────────────┬───────────┘  │
+│         │                      │              │
+│         └──────┬───────────────┘              │
+│                │                              │
+│         ┌──────┴──────┐                       │
+│         │ Webfuse     │                       │
+│         │ Proxy Layer │                       │
+│         └──────┬──────┘                       │
+│                │                              │
+└────────────────┼──────────────────────────────┘
+                 │
+        ┌────────┴────────┐
+        │ Your AI Agent   │
+        │ (Claude, GPT,   │
+        │  Vapi, custom)  │
+        └─────────────────┘
+```
 
-Open it. Tell the agent what to do. Watch it work.
+No extension install for the end user. No credential hand-off. No headless browser in the cloud. The user browses their real site, through Webfuse, and your agent operates in their live session.
 
-If you're building AI agents that need to interact with real authenticated web apps — voice agents, workflow automation, enterprise tooling — Webfuse is the missing layer.
+---
 
-**[→ Try the live demo](https://webfu.se/+hummerbot/)**
-**[→ View the code on GitHub](https://github.com/hummer-netizen/webfuse-webmcp-demo)**
+## Webfuse vs. Everything Else
+
+|  | Webfuse | WebMCP (native) | Claude in Chrome | Remote Browsers | Playwright |
+|--|---------|----------------|-----------------|-----------------|------------|
+| Works on any site today | ✅ | ❌ (site must implement) | ✅ | ✅ | ✅ |
+| Real user session | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Cross-site journeys | ✅ | ❌ | ❌ | ⚠️ | ⚠️ |
+| Custom tools (your definition) | ✅ | ❌ (site defines) | ❌ | ❌ | ✅ (fragile) |
+| No client install | ✅ | ✅ | ❌ | ✅ | ✅ |
+| Legacy app support | ✅ | ❌ | ✅ | ⚠️ | ⚠️ |
+| Productizable (embed in your app) | ✅ | N/A | ❌ | ⚠️ | ✅ |
+| Enterprise-grade (SOC2, ISO27001) | ✅ | N/A | ❌ | Varies | ❌ |
+
+---
+
+## Who This Is For
+
+**Voice AI builders** (Vapi, ElevenLabs, Deepgram): Your agent has a brain. Webfuse gives it hands. Book hotels, fill forms, navigate portals — in the user's live session, by voice.
+
+**Automation builders** (LangChain, CrewAI, OpenAI Agents SDK): Stop maintaining Playwright scripts. Define semantic tools once, let the proxy handle the UI complexity.
+
+**Enterprise teams**: Automate internal portals, legacy apps, and third-party tools without waiting for vendors to ship APIs or WebMCP support. SOC2 Type II. ISO 27001. 99.99% uptime.
+
+**AI consultancies and agencies**: Build productized AI journeys on your clients' web apps. Your expertise + Webfuse tools = repeatable value.
+
+---
+
+## The Bottom Line
+
+WebMCP is the right idea. Structured tools for AI agents are the future. But waiting for every site to implement it is like waiting for every restaurant to join a single delivery platform.
+
+Webfuse doesn't wait. It gives *you* — the AI builder, the automation team, the domain expert — the power to define tools on any site, control entire journeys, and ship today.
+
+**WebMCP asks websites to cooperate. Webfuse doesn't have to ask.**
+
+**[→ See the Booking.com demo](https://webfu.se/+bookingcom-agent-demo)**
+**[→ View the source](https://github.com/hummer-netizen/webfuse-webmcp-demo)**
 **[→ Get started with Webfuse](https://webfuse.com)**
 **[→ Talk to the team](https://webfuse.com/contact)**
 
 ---
 
-*Built with Webfuse + Claude Sonnet 4.6. Questions or feedback: [hummer@nichol.as](mailto:hummer@nichol.as)*
+*Built with Webfuse. Questions: [hummer@nichol.as](mailto:hummer@nichol.as)*
