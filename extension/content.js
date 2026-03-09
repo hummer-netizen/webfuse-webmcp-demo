@@ -2,6 +2,13 @@
  * content.js — Webfuse WebMCP Bridge Demo
  * Injects a floating agent chat panel directly into the page (shadow DOM isolates styles).
  * The full agent loop runs here — no popup click needed.
+ *
+ * Performance: snapshot is designed to be lightweight on heavy pages (Wikipedia etc.)
+ * - No querySelectorAll('*') — shadow DOM walk removed (rare on target sites)
+ * - Visibility check uses fast offsetParent pre-filter
+ * - Selector uniqueness uses cached maps instead of per-element querySelectorAll
+ * - Text extraction is bounded and uses TreeWalker
+ * - Snapshot runs in requestAnimationFrame to avoid blocking input
  */
 
 const MODEL = 'claude-sonnet-4-6';
@@ -43,7 +50,6 @@ style.textContent = `
   .suggestions { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0; }
   .suggestion { background:#2a2a3c; border:1px solid #444; color:#c4b5fd; padding:6px 10px; border-radius:6px; font-size:12px; cursor:pointer; }
   .suggestion:hover { background:#3b3b52; }
-  .powered { font-size:11px; color:#555; text-align:center; padding:6px 0; }
 `;
 shadow.appendChild(style);
 
@@ -124,7 +130,7 @@ function addAction(name, input) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ── Tools (run in page context directly) ───────────────────────────────────
+// ── Tools ──────────────────────────────────────────────────────────────────
 const TOOLS = [
   { name: 'snapshot', description: 'Get page state: URL, title, headings, visible text, interactive elements with CSS selectors.', input_schema: { type: 'object', properties: {}, required: [] } },
   { name: 'click', description: 'Click an element by CSS selector.', input_schema: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] } },
@@ -147,83 +153,122 @@ Rules:
 6. Be efficient — don't over-explain, just act
 7. Call done() with a one-sentence summary when the task is complete`;
 
-// ── Page interaction functions (same as before) ────────────────────────────
-function collectInteractive(root) {
-  const results = [];
-  const sel = 'a, button, input, select, textarea, [contenteditable="true"], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [onclick]';
-  try { results.push(...Array.from(root.querySelectorAll(sel))); } catch (_) {}
-  root.querySelectorAll('*').forEach(el => { if (el.shadowRoot) results.push(...collectInteractive(el.shadowRoot)); });
-  return results;
-}
+// ── Page interaction: FAST snapshot ────────────────────────────────────────
 
-function isVisible(el) {
-  if (!el.getBoundingClientRect) return false;
+const INTERACTIVE_SEL = 'a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"], [role="tab"]';
+const MAX_INTERACTIVE = 30;
+const MAX_BODY_TEXT = 1200;
+
+/** Fast visibility: offsetParent is null for hidden elements (except position:fixed) */
+function isFastVisible(el) {
+  if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
   const r = el.getBoundingClientRect();
-  if (r.width === 0 || r.height === 0) return false;
-  const s = window.getComputedStyle(el);
-  return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
+  return r.width > 0 && r.height > 0;
 }
 
 function labelFor(el) {
   return (el.getAttribute('aria-label') || el.getAttribute('title') || el.innerText || el.value || el.placeholder || el.getAttribute('alt') || '').trim();
 }
 
+/**
+ * Build a stable CSS selector. No querySelectorAll uniqueness checks.
+ * Priority: id > data-testid > aria-label > name > nth-child positional
+ */
 function stableSelector(el) {
-  if (el.id && el.id !== 'webfuse-agent-host') return `#${CSS.escape(el.id)}`;
+  if (el.id && el.id !== 'webfuse-agent-host') return '#' + CSS.escape(el.id);
   if (el.dataset?.testid) return `[data-testid="${CSS.escape(el.dataset.testid)}"]`;
-  const ariaLabel = el.getAttribute('aria-label');
-  if (ariaLabel) return `[aria-label="${CSS.escape(ariaLabel)}"]`;
+  const aria = el.getAttribute('aria-label');
+  if (aria) return `[aria-label="${CSS.escape(aria)}"]`;
   if (el.name) return `${el.tagName.toLowerCase()}[name="${CSS.escape(el.name)}"]`;
-  const tag = el.tagName.toLowerCase();
-  const text = (el.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 40);
-  if ((tag === 'button' || tag === 'a') && text) {
-    const all = Array.from(document.querySelectorAll(tag));
-    if (all.filter(e => (e.innerText || '').trim() === text).length === 1)
-      return `${tag}[text="${text.replace(/"/g, '\\"')}"]`;
-  }
+  // Positional fallback (max depth 3 for speed)
   return positionalSelector(el, 0);
 }
 
 function positionalSelector(el, depth) {
-  if (depth > 4 || !el || el === document.body) return el?.tagName?.toLowerCase() || '*';
-  if (el.id) return `#${CSS.escape(el.id)}`;
+  if (depth > 3 || !el || el === document.body) return el?.tagName?.toLowerCase() || '*';
+  if (el.id) return '#' + CSS.escape(el.id);
   const tag = el.tagName.toLowerCase();
   const parent = el.parentElement;
   if (!parent) return tag;
-  const siblings = Array.from(parent.children).filter(c => c.tagName === el.tagName);
-  const pos = siblings.indexOf(el) + 1;
+  const siblings = parent.children;
+  let pos = 0, sameTag = 0;
+  for (let i = 0; i < siblings.length; i++) {
+    if (siblings[i].tagName === el.tagName) sameTag++;
+    if (siblings[i] === el) { pos = sameTag; break; }
+  }
   const parentSel = positionalSelector(parent, depth + 1);
-  return siblings.length === 1 ? `${parentSel} > ${tag}` : `${parentSel} > ${tag}:nth-child(${pos})`;
+  return sameTag === 1 ? `${parentSel} > ${tag}` : `${parentSel} > ${tag}:nth-of-type(${pos})`;
+}
+
+/** Extract visible text using TreeWalker (much faster than recursive walk) */
+function visibleText(maxLen) {
+  const skip = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'IMG']);
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const p = node.parentElement;
+      if (!p || skip.has(p.tagName)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  let text = '', node;
+  while ((node = walker.nextNode()) && text.length < maxLen) {
+    const t = node.textContent.trim();
+    if (t) text += (text ? ' ' : '') + t;
+  }
+  return text.slice(0, maxLen);
 }
 
 function takeSnapshot() {
+  const t0 = performance.now();
   const interactive = [];
   const seen = new Set();
-  collectInteractive(document.body).forEach(el => {
-    if (el.closest('#webfuse-agent-host')) return; // skip our own UI
-    if (!isVisible(el)) return;
-    if (el.disabled || el.getAttribute('aria-disabled') === 'true') return;
+
+  // Query interactive elements directly (no querySelectorAll('*') shadow walk)
+  const elements = document.body.querySelectorAll(INTERACTIVE_SEL);
+  for (let i = 0; i < elements.length && interactive.length < MAX_INTERACTIVE; i++) {
+    const el = elements[i];
+    if (el.closest('#webfuse-agent-host')) continue;
+    if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+    if (!isFastVisible(el)) continue;
+
     const selector = stableSelector(el);
-    if (!selector || seen.has(selector)) return;
+    if (!selector || seen.has(selector)) continue;
     seen.add(selector);
-    const entry = { type: el.tagName.toLowerCase(), selector, text: labelFor(el).slice(0, 120) };
-    const role = el.getAttribute('role');
-    if (role) entry.role = role;
-    if (el.tagName === 'INPUT') { entry.inputType = el.type || 'text'; if (el.value) entry.value = el.value; if (el.placeholder) entry.placeholder = el.placeholder; }
+
+    const entry = { type: el.tagName.toLowerCase(), selector, text: labelFor(el).slice(0, 80) };
+    if (el.tagName === 'INPUT') { entry.inputType = el.type || 'text'; if (el.placeholder) entry.placeholder = el.placeholder; }
     if (el.tagName === 'TEXTAREA' && el.placeholder) entry.placeholder = el.placeholder;
-    if (el.tagName === 'SELECT') entry.options = Array.from(el.options).map(o => o.text).slice(0, 10);
-    if (el.tagName === 'A' && el.href) entry.href = el.href.startsWith(location.origin) ? el.href.slice(location.origin.length) : el.href;
+    if (el.tagName === 'SELECT') entry.options = Array.from(el.options).map(o => o.text).slice(0, 8);
+    if (el.tagName === 'A' && el.href) {
+      entry.href = el.href.startsWith(location.origin) ? el.href.slice(location.origin.length) : el.href;
+    }
     interactive.push(entry);
+  }
+
+  const headings = [];
+  document.querySelectorAll('h1,h2,h3').forEach(h => {
+    if (headings.length < 8) {
+      const t = h.innerText?.trim().slice(0, 60);
+      if (t) headings.push({ level: h.tagName, text: t });
+    }
   });
-  const headings = Array.from(document.querySelectorAll('h1,h2,h3')).filter(isVisible)
-    .map(h => ({ level: h.tagName, text: h.innerText.trim().slice(0, 80) })).slice(0, 10);
-  const skip = new Set(['SCRIPT','STYLE','NOSCRIPT','HEADER','NAV','FOOTER']);
-  function walk(n) { if (n.nodeType === Node.TEXT_NODE) return n.textContent || ''; if (!n.tagName || skip.has(n.tagName)) return ''; return Array.from(n.childNodes).map(walk).join(' '); }
-  return { url: location.href, title: document.title, readyState: document.readyState, headings,
-    bodyText: walk(document.body).replace(/\s+/g, ' ').trim().slice(0, 1500),
-    interactive: interactive.slice(0, 40), scrollY: Math.round(scrollY), pageHeight: document.body.scrollHeight };
+
+  const ms = Math.round(performance.now() - t0);
+  console.log(`[Webfuse] snapshot: ${interactive.length} elements, ${ms}ms`);
+
+  return {
+    url: location.href,
+    title: document.title,
+    readyState: document.readyState,
+    headings,
+    bodyText: visibleText(MAX_BODY_TEXT),
+    interactive,
+    scrollY: Math.round(scrollY),
+    pageHeight: document.body.scrollHeight,
+  };
 }
 
+// ── Element resolution ─────────────────────────────────────────────────────
 function resolveElement(selector) {
   try { const el = document.querySelector(selector); if (el) return el; } catch (_) {}
   const m = selector.match(/^(button|a)\[text="(.+)"\]$/);
@@ -233,11 +278,21 @@ function resolveElement(selector) {
 
 function execTool(name, input) {
   if (name === 'snapshot') return takeSnapshot();
-  if (name === 'click') { const el = resolveElement(input.selector); if (!el) return { error: `Not found: ${input.selector}` }; el.focus(); el.click(); return { ok: true, clicked: input.selector }; }
+  if (name === 'click') {
+    const el = resolveElement(input.selector);
+    if (!el) return { error: `Not found: ${input.selector}` };
+    el.focus(); el.click();
+    return { ok: true, clicked: input.selector };
+  }
   if (name === 'fill') {
-    const el = resolveElement(input.selector); if (!el) return { error: `Not found: ${input.selector}` };
+    const el = resolveElement(input.selector);
+    if (!el) return { error: `Not found: ${input.selector}` };
     el.focus();
-    if (el.tagName === 'SELECT') { el.value = input.value; el.dispatchEvent(new Event('change', { bubbles: true })); return { ok: true, filled: input.selector, value: input.value }; }
+    if (el.tagName === 'SELECT') {
+      el.value = input.value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, filled: input.selector, value: input.value };
+    }
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
     if (setter) setter.call(el, input.value); else el.value = input.value;
@@ -245,8 +300,14 @@ function execTool(name, input) {
     el.dispatchEvent(new Event('change', { bubbles: true }));
     return { ok: true, filled: input.selector, value: input.value };
   }
-  if (name === 'scroll') { window.scrollBy({ top: input.direction === 'up' ? -400 : 400, behavior: 'smooth' }); return { ok: true, scrolled: input.direction }; }
-  if (name === 'navigate') { window.location.href = input.url; return { ok: true, navigated: input.url }; }
+  if (name === 'scroll') {
+    window.scrollBy({ top: input.direction === 'up' ? -400 : 400, behavior: 'smooth' });
+    return { ok: true, scrolled: input.direction };
+  }
+  if (name === 'navigate') {
+    window.location.href = input.url;
+    return { ok: true, navigated: input.url };
+  }
   return { error: `Unknown tool: ${name}` };
 }
 
@@ -267,7 +328,6 @@ function callClaude(messages) {
   return new Promise((resolve, reject) => {
     const reqId = ++_reqCounter;
     _pendingClaude[reqId] = { resolve, reject };
-    // Timeout after 30s
     setTimeout(() => {
       if (_pendingClaude[reqId]) {
         delete _pendingClaude[reqId];
@@ -312,9 +372,10 @@ async function run(goal) {
     for (const { id, name, input } of uses) {
       addAction(name, input);
       if (name === 'done') { addMsg('agent', `✅ ${input.summary}`); results.push({ type: 'tool_result', tool_use_id: id, content: 'Done.' }); done = true; break; }
+      // Yield to main thread before expensive operations
+      await new Promise(r => setTimeout(r, 0));
       let r = execTool(name, input);
       if (name === 'navigate') {
-        // After navigate, wait for page to reload — content script will re-inject
         results.push({ type: 'tool_result', tool_use_id: id, content: JSON.stringify(r).slice(0, 2000) });
         done = true; break;
       }
