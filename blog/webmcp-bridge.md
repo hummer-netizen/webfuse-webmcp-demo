@@ -1,12 +1,12 @@
 # Your AI Agent Has a Brain. Give It Hands.
 
-*March 2026* — This week, Anthropic shipped Claude in Chrome. Google shipped WebMCP in Chrome 146. Everyone is racing to give AI agents access to the web.
+Every major AI lab is racing to give agents access to the web. Anthropic shipped Claude in Chrome. Google shipped WebMCP in Chrome 146. Vercel shipped agent-browser. OpenAI shipped Operator.
 
-Here's the problem none of them have fully solved yet: **your user's web**.
+They all demo beautifully. They all hit the same wall: **your user's web**.
 
-Not a sandboxed demo page. Not a headless test environment. The actual live website your user is logged into — with their real account, their real session, their real data.
+Not a sandboxed demo page. Not a headless test environment. The live, authenticated website your user is already logged into — with their real account, their real session, their real data. The system your voice agent needs to update. The portal your workflow tool needs to read.
 
-That's the gap. And it's bigger than it looks.
+That's the gap. And every production team building with AI agents hits it sooner or later.
 
 ---
 
@@ -111,8 +111,11 @@ The demo at **[webfu.se/+hummerbot/](https://webfu.se/+hummerbot/)** shows a Cla
 
 Open it. Tell the agent what to do. Watch it work.
 
+If you're building AI agents that need to interact with real authenticated web apps — voice agents, workflow automation, enterprise tooling — Webfuse is the missing layer.
+
+**[→ Try the live demo](https://webfu.se/+hummerbot/)**
 **[→ View the code](https://github.com/hummer-netizen/webfuse-webmcp-demo)**
-**[→ Learn about Webfuse](https://webfuse.com)**
+**[→ Get started with Webfuse](https://webfuse.com)**
 
 ---
 

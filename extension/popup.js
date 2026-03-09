@@ -216,7 +216,13 @@ async function run(goal) {
       else if (name === 'fill')      r = await pageTool('FILL', input);
       else if (name === 'navigate') {
         r = await pageTool('NAVIGATE', input);
-        await sleep(1500); // wait for page load before next snapshot
+        // Poll for readyState instead of blind sleep (max 5s)
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          await sleep(400);
+          const check = await pageTool('SNAPSHOT');
+          if (check?.readyState === 'complete' || check?.readyState === 'interactive') break;
+        }
       }
       else if (name === 'scroll')    r = await pageTool('SCROLL', input);
       else                           r = { error: `Unknown tool: ${name}` };
