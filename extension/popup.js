@@ -91,9 +91,10 @@ Rules:
 1. Start every task with snapshot()
 2. Prefer stable selectors: id > data-testid > aria-label > name > text-hint > positional
 3. After each action, snapshot again to verify the result
-4. On failure, try an alternative selector or approach before giving up
-5. Be efficient — don't over-explain, just act
-6. Call done() with a one-sentence summary when the task is complete`;
+4. After navigate(), snapshot() will include readyState — if it shows 'loading', snapshot() again before acting
+5. On failure, try an alternative selector or approach before giving up
+6. Be efficient — don't over-explain, just act
+7. Call done() with a one-sentence summary when the task is complete`;
 
 const SUGGESTIONS = [
   '🔍 Search for "AI agents" using the search bar',
@@ -140,6 +141,9 @@ function action(name, input) {
   messagesEl.appendChild(d);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
+
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function pageTool(type, payload = {}) {
   return new Promise(resolve => {
@@ -199,7 +203,10 @@ async function run(goal) {
       if      (name === 'snapshot')  r = await pageTool('SNAPSHOT');
       else if (name === 'click')     r = await pageTool('CLICK', input);
       else if (name === 'fill')      r = await pageTool('FILL', input);
-      else if (name === 'navigate')  r = await pageTool('NAVIGATE', input);
+      else if (name === 'navigate') {
+        r = await pageTool('NAVIGATE', input);
+        await sleep(1500); // wait for page load before next snapshot
+      }
       else if (name === 'scroll')    r = await pageTool('SCROLL', input);
       else                           r = { error: `Unknown tool: ${name}` };
       results.push({ type: 'tool_result', tool_use_id: id, content: JSON.stringify(r).slice(0, 3000) });

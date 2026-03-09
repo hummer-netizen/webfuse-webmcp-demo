@@ -68,6 +68,7 @@ function takeSnapshot() {
   return {
     url: window.location.href,
     title: document.title,
+    readyState: document.readyState,         // 'loading'|'interactive'|'complete'
     headings,
     bodyText: visibleText().slice(0, 3000),
     interactive: interactive.slice(0, 60),
