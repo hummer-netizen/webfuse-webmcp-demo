@@ -26,13 +26,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+function collectInteractive(root) {
+  const results = [];
+  const selector = 'a, button, input, select, textarea, [contenteditable="true"], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [onclick]';
+  try { results.push(...Array.from(root.querySelectorAll(selector))); } catch (_) {}
+  // Walk shadow roots recursively
+  root.querySelectorAll('*').forEach(el => {
+    if (el.shadowRoot) results.push(...collectInteractive(el.shadowRoot));
+  });
+  return results;
+}
+
 function takeSnapshot() {
   const interactive = [];
   const seen = new Set();
 
-  document.querySelectorAll(
-    'a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"], [role="tab"], [onclick]'
-  ).forEach((el) => {
+  // Collect elements from main DOM + shadow roots
+  const allElements = collectInteractive(document.body);
+  allElements.forEach((el) => {
     if (!isVisible(el)) return;
     const selector = stableSelector(el);
     if (!selector || seen.has(selector)) return;
@@ -48,7 +59,9 @@ function takeSnapshot() {
     if (el.tagName === 'INPUT') {
       entry.inputType = el.type || 'text';
       if (el.value) entry.value = el.value;
+      if (el.placeholder) entry.placeholder = el.placeholder;
     }
+    if (el.tagName === 'TEXTAREA' && el.placeholder) entry.placeholder = el.placeholder;
     if (el.tagName === 'SELECT') {
       entry.options = Array.from(el.options).map(o => o.text).slice(0, 10);
     }

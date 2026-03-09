@@ -157,14 +157,25 @@ async function pageTool(type, payload = {}) {
   });
 }
 
-async function callClaude(messages) {
-  const res = await fetch(`${PROXY_URL}/v1/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM, tools: TOOLS, messages }),
-  });
-  if (!res.ok) throw new Error(`Proxy ${res.status}: ${(await res.text()).slice(0, 150)}`);
-  return res.json();
+async function callClaude(messages, retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(`${PROXY_URL}/v1/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM, tools: TOOLS, messages }),
+      });
+      if (res.status === 429 || res.status >= 500) {
+        const wait = (attempt + 1) * 1500;
+        if (attempt < retries) { await sleep(wait); continue; }
+      }
+      if (!res.ok) throw new Error(`Proxy ${res.status}: ${(await res.text()).slice(0, 150)}`);
+      return res.json();
+    } catch (e) {
+      if (attempt < retries && e.name !== 'SyntaxError') { await sleep((attempt + 1) * 1500); continue; }
+      throw e;
+    }
+  }
 }
 
 async function run(goal) {
