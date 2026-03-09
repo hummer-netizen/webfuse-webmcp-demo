@@ -215,14 +215,19 @@ async function run(goal) {
       else if (name === 'click')     r = await pageTool('CLICK', input);
       else if (name === 'fill')      r = await pageTool('FILL', input);
       else if (name === 'navigate') {
-        r = await pageTool('NAVIGATE', input);
-        // Poll for readyState instead of blind sleep (max 5s)
+        await pageTool('NAVIGATE', input);
+        // Poll readyState, then return the final snapshot as the tool result
+        // so Claude doesn't need a separate snapshot() call after navigation
         const deadline = Date.now() + 5000;
+        let finalSnap = { ok: true, navigated: input.url };
         while (Date.now() < deadline) {
           await sleep(400);
           const check = await pageTool('SNAPSHOT');
-          if (check?.readyState === 'complete' || check?.readyState === 'interactive') break;
+          if (check?.readyState === 'complete' || check?.readyState === 'interactive') {
+            finalSnap = check; break;
+          }
         }
+        r = finalSnap;
       }
       else if (name === 'scroll')    r = await pageTool('SCROLL', input);
       else                           r = { error: `Unknown tool: ${name}` };
