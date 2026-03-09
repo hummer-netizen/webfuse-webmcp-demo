@@ -220,8 +220,8 @@ function takeSnapshot() {
   const skip = new Set(['SCRIPT','STYLE','NOSCRIPT','HEADER','NAV','FOOTER']);
   function walk(n) { if (n.nodeType === Node.TEXT_NODE) return n.textContent || ''; if (!n.tagName || skip.has(n.tagName)) return ''; return Array.from(n.childNodes).map(walk).join(' '); }
   return { url: location.href, title: document.title, readyState: document.readyState, headings,
-    bodyText: walk(document.body).replace(/\s+/g, ' ').trim().slice(0, 3000),
-    interactive: interactive.slice(0, 60), scrollY: Math.round(scrollY), pageHeight: document.body.scrollHeight };
+    bodyText: walk(document.body).replace(/\s+/g, ' ').trim().slice(0, 1500),
+    interactive: interactive.slice(0, 40), scrollY: Math.round(scrollY), pageHeight: document.body.scrollHeight };
 }
 
 function resolveElement(selector) {
@@ -315,10 +315,10 @@ async function run(goal) {
       let r = execTool(name, input);
       if (name === 'navigate') {
         // After navigate, wait for page to reload — content script will re-inject
-        results.push({ type: 'tool_result', tool_use_id: id, content: JSON.stringify(r).slice(0, 3000) });
+        results.push({ type: 'tool_result', tool_use_id: id, content: JSON.stringify(r).slice(0, 2000) });
         done = true; break;
       }
-      results.push({ type: 'tool_result', tool_use_id: id, content: JSON.stringify(r).slice(0, 3000) });
+      results.push({ type: 'tool_result', tool_use_id: id, content: JSON.stringify(r).slice(0, 2000) });
     }
 
     history.push({ role: 'user', content: results });
