@@ -11,7 +11,7 @@
  * - Snapshot runs in requestAnimationFrame to avoid blocking input
  */
 
-const MODEL = 'claude-sonnet-4-6';
+const MODEL = 'claude-haiku-3-5';
 const MAX_TURNS = 10;
 
 // ── Shadow DOM host ────────────────────────────────────────────────────────
@@ -337,7 +337,7 @@ function callClaude(messages) {
     browser.runtime.sendMessage({
       type: 'CLAUDE_API',
       reqId,
-      payload: { model: MODEL, max_tokens: 1024, system: SYSTEM, tools: TOOLS, messages }
+      payload: { model: MODEL, max_tokens: 512, system: SYSTEM, tools: TOOLS, messages }
     });
   });
 }
