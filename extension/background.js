@@ -1,12 +1,19 @@
 /**
- * background.js — Handles Claude API calls outside the proxy context
+ * background.js — Handles Claude API calls outside the proxy context.
+ * Uses two-way messaging: content → background (request), background → content (response).
  */
 const PROXY_URL = 'https://proxy.webfuse.it';
 
 browser.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === 'CLAUDE_API') {
-    // Return a Promise — Webfuse extension messaging supports this
-    return callClaude(message.payload);
+    const reqId = message.reqId;
+    const tabId = sender.tab?.id ?? null;
+    // Fire-and-forget — result sent back via tabs.sendMessage
+    callClaude(message.payload).then(data => {
+      browser.tabs.sendMessage(tabId, { type: 'CLAUDE_RESPONSE', reqId, data });
+    }).catch(err => {
+      browser.tabs.sendMessage(tabId, { type: 'CLAUDE_RESPONSE', reqId, error: err.message });
+    });
   }
 });
 

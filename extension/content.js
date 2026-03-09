@@ -251,14 +251,35 @@ function execTool(name, input) {
 }
 
 // ── Claude API (via background script — avoids Webfuse proxy interception) ──
-async function callClaude(messages) {
-  const response = await browser.runtime.sendMessage({
-    type: 'CLAUDE_API',
-    payload: { model: MODEL, max_tokens: 1024, system: SYSTEM, tools: TOOLS, messages }
+let _pendingClaude = {};
+let _reqCounter = 0;
+
+browser.runtime.onMessage.addListener((message) => {
+  if (message?.type === 'CLAUDE_RESPONSE' && _pendingClaude[message.reqId]) {
+    const { resolve, reject } = _pendingClaude[message.reqId];
+    delete _pendingClaude[message.reqId];
+    if (message.error) reject(new Error(message.error));
+    else resolve(message.data);
+  }
+});
+
+function callClaude(messages) {
+  return new Promise((resolve, reject) => {
+    const reqId = ++_reqCounter;
+    _pendingClaude[reqId] = { resolve, reject };
+    // Timeout after 30s
+    setTimeout(() => {
+      if (_pendingClaude[reqId]) {
+        delete _pendingClaude[reqId];
+        reject(new Error('Background script timeout (30s)'));
+      }
+    }, 30000);
+    browser.runtime.sendMessage({
+      type: 'CLAUDE_API',
+      reqId,
+      payload: { model: MODEL, max_tokens: 1024, system: SYSTEM, tools: TOOLS, messages }
+    });
   });
-  if (!response) throw new Error('No response from background script');
-  if (response.error) throw new Error(response.error);
-  return response;
 }
 
 // ── Agent loop ─────────────────────────────────────────────────────────────
