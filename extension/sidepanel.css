@@ -28,19 +28,21 @@ body.active {
 }
 .header .title { font-weight: 700; font-size: 15px; color: #c4b5fd; }
 .header .status {
-  font-size: 11px; color: #666;
-  padding: 2px 8px; border-radius: 10px;
+  font-size: 12px; color: #888;
+  padding: 4px 12px; border-radius: 10px;
   background: rgba(139,92,246,0.1);
   transition: all 0.3s;
+  font-weight: 500;
 }
 .header .status.thinking {
-  color: #a78bfa;
-  background: rgba(139,92,246,0.2);
-  animation: status-pulse 1s ease-in-out infinite;
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #6366f1);
+  box-shadow: 0 0 14px rgba(139,92,246,0.6);
+  animation: status-glow 1.2s ease-in-out infinite;
 }
-@keyframes status-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+@keyframes status-glow {
+  0%, 100% { box-shadow: 0 0 14px rgba(139,92,246,0.6); }
+  50% { box-shadow: 0 0 24px rgba(139,92,246,0.9); }
 }
 
 .messages {
