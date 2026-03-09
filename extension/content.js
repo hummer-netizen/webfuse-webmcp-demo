@@ -1,169 +1,160 @@
 /**
- * content.js — Webfuse Extension content script
- * Injected into the proxied website. Provides the agent with
- * "eyes" (page snapshot) and "hands" (click, fill, navigate).
- *
- * Communicates with popup.js via chrome.runtime messaging.
+ * content.js — Webfuse WebMCP Bridge Demo
+ * Injects a floating agent chat panel directly into the page (shadow DOM isolates styles).
+ * The full agent loop runs here — no popup click needed.
  */
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  const { type, payload } = message;
-  try {
-    switch (type) {
-      case 'SNAPSHOT':  sendResponse({ ok: true, result: takeSnapshot() }); break;
-      case 'CLICK':     sendResponse(performClick(payload.selector)); break;
-      case 'FILL':      sendResponse(performFill(payload.selector, payload.value)); break;
-      case 'NAVIGATE':
-        sendResponse({ ok: true });
-        setTimeout(() => { window.location.href = payload.url; }, 50);
-        break;
-      case 'SCROLL':    sendResponse(performScroll(payload.direction)); break;
-      default:          sendResponse({ error: `Unknown action: ${type}` });
-    }
-  } catch (e) {
-    sendResponse({ error: e.message });
-  }
-  return true;
-});
+const PROXY_URL = 'https://proxy.webfuse.it';
+const MODEL = 'claude-sonnet-4-6';
+const MAX_TURNS = 10;
 
+// ── Shadow DOM host ────────────────────────────────────────────────────────
+const host = document.createElement('div');
+host.id = 'webfuse-agent-host';
+host.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:2147483647;font-family:system-ui,sans-serif;';
+document.documentElement.appendChild(host);
+const shadow = host.attachShadow({ mode: 'closed' });
+
+// ── Styles ─────────────────────────────────────────────────────────────────
+const style = document.createElement('style');
+style.textContent = `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  .fab { width:56px; height:56px; border-radius:50%; border:none; background:#6366f1; color:#fff;
+         font-size:24px; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.25); transition:transform .15s; display:flex; align-items:center; justify-content:center; }
+  .fab:hover { transform:scale(1.08); }
+  .panel { display:none; width:380px; height:520px; border-radius:12px; background:#1e1e2e; color:#e0e0e0;
+           box-shadow:0 8px 30px rgba(0,0,0,.35); flex-direction:column; overflow:hidden; font-size:14px; }
+  .panel.open { display:flex; }
+  .header { padding:12px 16px; background:#2a2a3c; display:flex; align-items:center; justify-content:space-between; }
+  .header .title { font-weight:600; font-size:14px; color:#c4b5fd; }
+  .header button { background:none; border:none; color:#888; cursor:pointer; font-size:18px; }
+  .messages { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px; }
+  .msg { padding:8px 12px; border-radius:8px; max-width:90%; word-wrap:break-word; line-height:1.4; font-size:13px; }
+  .msg.user { background:#4f46e5; color:#fff; align-self:flex-end; }
+  .msg.agent { background:#2a2a3c; color:#e0e0e0; align-self:flex-start; }
+  .msg.system { color:#888; font-size:12px; text-align:center; align-self:center; }
+  .msg.error { color:#f87171; font-size:12px; }
+  .msg.thinking { color:#a78bfa; font-size:12px; font-style:italic; }
+  .action-pill { background:#3b3b52; padding:2px 8px; border-radius:4px; font-family:monospace; font-size:12px; }
+  .input-row { padding:10px 12px; background:#2a2a3c; display:flex; gap:8px; }
+  .input-row input { flex:1; padding:8px 12px; border-radius:8px; border:1px solid #444; background:#1e1e2e; color:#e0e0e0; font-size:13px; outline:none; }
+  .input-row input:focus { border-color:#6366f1; }
+  .input-row button { padding:8px 14px; border-radius:8px; border:none; background:#6366f1; color:#fff; cursor:pointer; font-size:13px; font-weight:600; }
+  .input-row button:disabled { opacity:.5; cursor:default; }
+  .suggestions { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0; }
+  .suggestion { background:#2a2a3c; border:1px solid #444; color:#c4b5fd; padding:6px 10px; border-radius:6px; font-size:12px; cursor:pointer; }
+  .suggestion:hover { background:#3b3b52; }
+  .powered { font-size:11px; color:#555; text-align:center; padding:6px 0; }
+`;
+shadow.appendChild(style);
+
+// ── FAB button ─────────────────────────────────────────────────────────────
+const fab = document.createElement('button');
+fab.className = 'fab';
+fab.textContent = '🤖';
+fab.title = 'Webfuse AI Agent';
+shadow.appendChild(fab);
+
+// ── Chat panel ─────────────────────────────────────────────────────────────
+const panel = document.createElement('div');
+panel.className = 'panel';
+panel.innerHTML = `
+  <div class="header">
+    <span class="title">🤖 Webfuse Agent</span>
+    <button id="close-btn">✕</button>
+  </div>
+  <div class="messages" id="messages"></div>
+  <div class="input-row">
+    <input id="input" type="text" placeholder="Tell the agent what to do…" />
+    <button id="send">Go</button>
+  </div>
+`;
+shadow.appendChild(panel);
+
+const messagesEl = shadow.getElementById('messages');
+const inputEl = shadow.getElementById('input');
+const sendBtn = shadow.getElementById('send');
+const closeBtn = shadow.getElementById('close-btn');
+
+let panelOpen = false;
+fab.onclick = () => { panelOpen = !panelOpen; panel.classList.toggle('open', panelOpen); fab.style.display = panelOpen ? 'none' : 'flex'; if (panelOpen) inputEl.focus(); };
+closeBtn.onclick = () => { panelOpen = false; panel.classList.remove('open'); fab.style.display = 'flex'; };
+
+// ── Suggestions ────────────────────────────────────────────────────────────
+const SUGGESTIONS = [
+  '🔍 Search for "AI agents"',
+  '📄 Summarise this page',
+  '🔗 Click the first link',
+  '📰 List the section headings',
+];
+
+function showSuggestions() {
+  const wrap = document.createElement('div');
+  wrap.className = 'suggestions';
+  SUGGESTIONS.forEach(s => {
+    const btn = document.createElement('button');
+    btn.className = 'suggestion';
+    btn.textContent = s;
+    btn.onclick = () => { wrap.remove(); inputEl.value = s.replace(/^[^\w]+/, ''); sendBtn.click(); };
+    wrap.appendChild(btn);
+  });
+  messagesEl.appendChild(wrap);
+  addMsg('system', 'Powered by Webfuse + Claude · webfuse.com');
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+showSuggestions();
+
+// ── Chat helpers ───────────────────────────────────────────────────────────
+function addMsg(role, text) {
+  const d = document.createElement('div');
+  d.className = `msg ${role}`;
+  d.textContent = text;
+  messagesEl.appendChild(d);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return d;
+}
+
+function addAction(name, input) {
+  const args = Object.entries(input).map(([k, v]) => `${k}="${String(v).slice(0, 35)}"`).join(', ');
+  const d = document.createElement('div');
+  d.className = 'msg thinking';
+  d.innerHTML = `<span class="action-pill">${name}(${args})</span>`;
+  messagesEl.appendChild(d);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── Tools (run in page context directly) ───────────────────────────────────
+const TOOLS = [
+  { name: 'snapshot', description: 'Get page state: URL, title, headings, visible text, interactive elements with CSS selectors.', input_schema: { type: 'object', properties: {}, required: [] } },
+  { name: 'click', description: 'Click an element by CSS selector.', input_schema: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] } },
+  { name: 'fill', description: 'Fill a form field with a value. Works on React and vanilla apps.', input_schema: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'value'] } },
+  { name: 'navigate', description: 'Navigate to a URL.', input_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
+  { name: 'scroll', description: 'Scroll the page up or down.', input_schema: { type: 'object', properties: { direction: { type: 'string', enum: ['up', 'down'] } }, required: ['direction'] } },
+  { name: 'done', description: 'Signal task complete.', input_schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } },
+];
+
+const SYSTEM = `You are a web automation agent inside a Webfuse-proxied browser session. You have direct, structured access to the live page — real auth, real cookies, real state.
+
+Tools: snapshot, click, fill, navigate, scroll, done.
+
+Rules:
+1. Start every task with snapshot()
+2. Prefer stable selectors: id > data-testid > aria-label > name > text-hint > positional
+3. After each action, snapshot again to verify the result
+4. After navigate(), the result includes the new page snapshot — no need for a separate snapshot call
+5. On failure, try an alternative selector or approach before giving up
+6. Be efficient — don't over-explain, just act
+7. Call done() with a one-sentence summary when the task is complete`;
+
+// ── Page interaction functions (same as before) ────────────────────────────
 function collectInteractive(root) {
   const results = [];
-  const selector = 'a, button, input, select, textarea, [contenteditable="true"], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [onclick]';
-  try { results.push(...Array.from(root.querySelectorAll(selector))); } catch (_) {}
-  // Walk shadow roots recursively
-  root.querySelectorAll('*').forEach(el => {
-    if (el.shadowRoot) results.push(...collectInteractive(el.shadowRoot));
-  });
+  const sel = 'a, button, input, select, textarea, [contenteditable="true"], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [onclick]';
+  try { results.push(...Array.from(root.querySelectorAll(sel))); } catch (_) {}
+  root.querySelectorAll('*').forEach(el => { if (el.shadowRoot) results.push(...collectInteractive(el.shadowRoot)); });
   return results;
-}
-
-function takeSnapshot() {
-  const interactive = [];
-  const seen = new Set();
-
-  // Collect elements from main DOM + shadow roots
-  const allElements = collectInteractive(document.body);
-  allElements.forEach((el) => {
-    if (!isVisible(el)) return;
-    if (el.disabled || el.getAttribute('aria-disabled') === 'true') return;
-    const selector = stableSelector(el);
-    if (!selector || seen.has(selector)) return;
-    seen.add(selector);
-
-    const entry = {
-      type: el.tagName.toLowerCase(),
-      selector,
-      text: labelFor(el).slice(0, 120),
-    };
-    const role = el.getAttribute('role');
-    if (role) entry.role = role;
-    if (el.tagName === 'INPUT') {
-      entry.inputType = el.type || 'text';
-      if (el.value) entry.value = el.value;
-      if (el.placeholder) entry.placeholder = el.placeholder;
-    }
-    if (el.tagName === 'TEXTAREA' && el.placeholder) entry.placeholder = el.placeholder;
-    if (el.tagName === 'SELECT') {
-      entry.options = Array.from(el.options).map(o => o.text).slice(0, 10);
-    }
-    if (el.tagName === 'A' && el.href) {
-      entry.href = el.href.startsWith(location.origin)
-        ? el.href.slice(location.origin.length)
-        : el.href;
-    }
-    interactive.push(entry);
-  });
-
-  const headings = Array.from(document.querySelectorAll('h1,h2,h3'))
-    .filter(isVisible)
-    .map(h => ({ level: h.tagName, text: h.innerText.trim().slice(0, 80) }))
-    .slice(0, 10);
-
-  return {
-    url: window.location.href,
-    title: document.title,
-    readyState: document.readyState,         // 'loading'|'interactive'|'complete'
-    headings,
-    bodyText: visibleText().slice(0, 3000),
-    interactive: interactive.slice(0, 60),
-    scrollY: Math.round(window.scrollY),
-    pageHeight: document.body.scrollHeight,
-  };
-}
-
-function visibleText() {
-  const skip = new Set(['SCRIPT','STYLE','NOSCRIPT','HEADER','NAV','FOOTER']);
-  function walk(node) {
-    if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
-    if (!node.tagName || skip.has(node.tagName)) return '';
-    return Array.from(node.childNodes).map(walk).join(' ');
-  }
-  return walk(document.body).replace(/\s+/g, ' ').trim();
-}
-
-function labelFor(el) {
-  return (
-    el.getAttribute('aria-label') ||
-    el.getAttribute('title') ||
-    el.innerText ||
-    el.value ||
-    el.placeholder ||
-    el.getAttribute('alt') ||
-    ''
-  ).trim();
-}
-
-function performClick(selector) {
-  const el = resolveElement(selector);
-  if (!el) return { error: `Element not found: ${selector}` };
-  el.focus();
-  el.click();
-  return { ok: true, clicked: selector };
-}
-
-function performFill(selector, value) {
-  const el = resolveElement(selector);
-  if (!el) return { error: `Element not found: ${selector}` };
-  el.focus();
-  if (el.tagName === 'SELECT') {
-    // For <select>: set value directly and dispatch change
-    el.value = value;
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return { ok: true, filled: selector, value, selectedText: el.options[el.selectedIndex]?.text };
-  }
-  const proto = el.tagName === 'TEXTAREA'
-    ? window.HTMLTextAreaElement.prototype
-    : window.HTMLInputElement.prototype;
-  const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-  if (nativeSetter) nativeSetter.call(el, value);
-  else el.value = value;
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-  return { ok: true, filled: selector, value };
-}
-
-function performScroll(direction) {
-  const amount = direction === 'up' ? -400 : 400;
-  window.scrollBy({ top: amount, behavior: 'smooth' });
-  return { ok: true, scrolled: direction };
-}
-
-/** Resolve a selector — handles both CSS and text-based fallback hints */
-function resolveElement(selector) {
-  // Try as standard CSS first
-  try {
-    const el = document.querySelector(selector);
-    if (el) return el;
-  } catch (_) {}
-
-  // Fallback: if selector looks like a text hint, find by text
-  const textMatch = selector.match(/^(button|a)\[text="(.+)"\]$/);
-  if (textMatch) {
-    const [, tag, text] = textMatch;
-    return Array.from(document.querySelectorAll(tag))
-      .find(el => el.innerText?.trim() === text) || null;
-  }
-  return null;
 }
 
 function isVisible(el) {
@@ -174,34 +165,23 @@ function isVisible(el) {
   return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
 }
 
-/**
- * Stable CSS selector — always returns valid CSS document.querySelector can handle.
- * Priority: id > data-testid > aria-label > name > text-hint > positional
- */
+function labelFor(el) {
+  return (el.getAttribute('aria-label') || el.getAttribute('title') || el.innerText || el.value || el.placeholder || el.getAttribute('alt') || '').trim();
+}
+
 function stableSelector(el) {
-  if (el.id) return `#${CSS.escape(el.id)}`;
-
-  if (el.dataset?.testid)
-    return `[data-testid="${CSS.escape(el.dataset.testid)}"]`;
-
+  if (el.id && el.id !== 'webfuse-agent-host') return `#${CSS.escape(el.id)}`;
+  if (el.dataset?.testid) return `[data-testid="${CSS.escape(el.dataset.testid)}"]`;
   const ariaLabel = el.getAttribute('aria-label');
-  if (ariaLabel)
-    return `[aria-label="${CSS.escape(ariaLabel)}"]`;
-
-  if (el.name)
-    return `${el.tagName.toLowerCase()}[name="${CSS.escape(el.name)}"]`;
-
-  // For buttons/links: generate a text-based selector hint (custom format the agent can use)
-  // resolveElement() handles these on the other side
+  if (ariaLabel) return `[aria-label="${CSS.escape(ariaLabel)}"]`;
+  if (el.name) return `${el.tagName.toLowerCase()}[name="${CSS.escape(el.name)}"]`;
   const tag = el.tagName.toLowerCase();
   const text = (el.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 40);
   if ((tag === 'button' || tag === 'a') && text) {
-    // Check it's unique before using text-based
     const all = Array.from(document.querySelectorAll(tag));
-    const matches = all.filter(e => (e.innerText || '').trim() === text);
-    if (matches.length === 1) return `${tag}[text="${text.replace(/"/g, '\\"')}"]`;
+    if (all.filter(e => (e.innerText || '').trim() === text).length === 1)
+      return `${tag}[text="${text.replace(/"/g, '\\"')}"]`;
   }
-
   return positionalSelector(el, 0);
 }
 
@@ -214,9 +194,129 @@ function positionalSelector(el, depth) {
   const siblings = Array.from(parent.children).filter(c => c.tagName === el.tagName);
   const pos = siblings.indexOf(el) + 1;
   const parentSel = positionalSelector(parent, depth + 1);
-  return siblings.length === 1
-    ? `${parentSel} > ${tag}`
-    : `${parentSel} > ${tag}:nth-child(${pos})`;
+  return siblings.length === 1 ? `${parentSel} > ${tag}` : `${parentSel} > ${tag}:nth-child(${pos})`;
 }
 
-console.log('[Webfuse WebMCP Demo] Content script active on', window.location.hostname);
+function takeSnapshot() {
+  const interactive = [];
+  const seen = new Set();
+  collectInteractive(document.body).forEach(el => {
+    if (el.closest('#webfuse-agent-host')) return; // skip our own UI
+    if (!isVisible(el)) return;
+    if (el.disabled || el.getAttribute('aria-disabled') === 'true') return;
+    const selector = stableSelector(el);
+    if (!selector || seen.has(selector)) return;
+    seen.add(selector);
+    const entry = { type: el.tagName.toLowerCase(), selector, text: labelFor(el).slice(0, 120) };
+    const role = el.getAttribute('role');
+    if (role) entry.role = role;
+    if (el.tagName === 'INPUT') { entry.inputType = el.type || 'text'; if (el.value) entry.value = el.value; if (el.placeholder) entry.placeholder = el.placeholder; }
+    if (el.tagName === 'TEXTAREA' && el.placeholder) entry.placeholder = el.placeholder;
+    if (el.tagName === 'SELECT') entry.options = Array.from(el.options).map(o => o.text).slice(0, 10);
+    if (el.tagName === 'A' && el.href) entry.href = el.href.startsWith(location.origin) ? el.href.slice(location.origin.length) : el.href;
+    interactive.push(entry);
+  });
+  const headings = Array.from(document.querySelectorAll('h1,h2,h3')).filter(isVisible)
+    .map(h => ({ level: h.tagName, text: h.innerText.trim().slice(0, 80) })).slice(0, 10);
+  const skip = new Set(['SCRIPT','STYLE','NOSCRIPT','HEADER','NAV','FOOTER']);
+  function walk(n) { if (n.nodeType === Node.TEXT_NODE) return n.textContent || ''; if (!n.tagName || skip.has(n.tagName)) return ''; return Array.from(n.childNodes).map(walk).join(' '); }
+  return { url: location.href, title: document.title, readyState: document.readyState, headings,
+    bodyText: walk(document.body).replace(/\s+/g, ' ').trim().slice(0, 3000),
+    interactive: interactive.slice(0, 60), scrollY: Math.round(scrollY), pageHeight: document.body.scrollHeight };
+}
+
+function resolveElement(selector) {
+  try { const el = document.querySelector(selector); if (el) return el; } catch (_) {}
+  const m = selector.match(/^(button|a)\[text="(.+)"\]$/);
+  if (m) return Array.from(document.querySelectorAll(m[1])).find(el => el.innerText?.trim() === m[2]) || null;
+  return null;
+}
+
+function execTool(name, input) {
+  if (name === 'snapshot') return takeSnapshot();
+  if (name === 'click') { const el = resolveElement(input.selector); if (!el) return { error: `Not found: ${input.selector}` }; el.focus(); el.click(); return { ok: true, clicked: input.selector }; }
+  if (name === 'fill') {
+    const el = resolveElement(input.selector); if (!el) return { error: `Not found: ${input.selector}` };
+    el.focus();
+    if (el.tagName === 'SELECT') { el.value = input.value; el.dispatchEvent(new Event('change', { bubbles: true })); return { ok: true, filled: input.selector, value: input.value }; }
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) setter.call(el, input.value); else el.value = input.value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return { ok: true, filled: input.selector, value: input.value };
+  }
+  if (name === 'scroll') { window.scrollBy({ top: input.direction === 'up' ? -400 : 400, behavior: 'smooth' }); return { ok: true, scrolled: input.direction }; }
+  if (name === 'navigate') { window.location.href = input.url; return { ok: true, navigated: input.url }; }
+  return { error: `Unknown tool: ${name}` };
+}
+
+// ── Claude API ─────────────────────────────────────────────────────────────
+async function callClaude(messages, retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(`${PROXY_URL}/v1/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM, tools: TOOLS, messages }),
+      });
+      if (res.status === 429 || res.status >= 500) { if (attempt < retries) { await sleep((attempt + 1) * 1500); continue; } }
+      if (!res.ok) throw new Error(`Proxy ${res.status}: ${(await res.text()).slice(0, 150)}`);
+      return res.json();
+    } catch (e) { if (attempt < retries && e.name !== 'SyntaxError') { await sleep((attempt + 1) * 1500); continue; } throw e; }
+  }
+}
+
+// ── Agent loop ─────────────────────────────────────────────────────────────
+let running = false;
+
+async function run(goal) {
+  running = true;
+  sendBtn.disabled = true;
+  inputEl.disabled = true;
+  const history = [{ role: 'user', content: goal }];
+  addMsg('user', goal);
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const thinking = addMsg('thinking', '⏳ thinking…');
+    let claude;
+    try { claude = await callClaude(history); }
+    catch (e) { thinking.remove(); addMsg('error', `❌ ${e.message}`); break; }
+    thinking.remove();
+
+    claude.content.filter(b => b.type === 'text' && b.text.trim()).forEach(b => addMsg('agent', b.text.trim()));
+    if (claude.stop_reason === 'end_turn') break;
+
+    const uses = claude.content.filter(b => b.type === 'tool_use');
+    if (!uses.length) break;
+
+    history.push({ role: 'assistant', content: claude.content });
+    const results = [];
+    let done = false;
+
+    for (const { id, name, input } of uses) {
+      addAction(name, input);
+      if (name === 'done') { addMsg('agent', `✅ ${input.summary}`); results.push({ type: 'tool_result', tool_use_id: id, content: 'Done.' }); done = true; break; }
+      let r = execTool(name, input);
+      if (name === 'navigate') {
+        // After navigate, wait for page to reload — content script will re-inject
+        results.push({ type: 'tool_result', tool_use_id: id, content: JSON.stringify(r).slice(0, 3000) });
+        done = true; break;
+      }
+      results.push({ type: 'tool_result', tool_use_id: id, content: JSON.stringify(r).slice(0, 3000) });
+    }
+
+    history.push({ role: 'user', content: results });
+    if (done) break;
+  }
+
+  running = false;
+  sendBtn.disabled = false;
+  inputEl.disabled = false;
+  inputEl.focus();
+}
+
+sendBtn.onclick = () => { const g = inputEl.value.trim(); if (!g || running) return; inputEl.value = ''; run(g); };
+inputEl.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn.click(); } };
+
+console.log('[Webfuse WebMCP Demo] Agent widget active on', location.hostname);
