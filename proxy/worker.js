@@ -1,5 +1,5 @@
 /**
- * Cloudflare Worker — Anthropic API Proxy
+ * Cloudflare Worker — Anthropic API Proxy (streaming-capable)
  * Deploy: wrangler deploy
  * Set secret: wrangler secret put ANTHROPIC_API_KEY
  */
@@ -17,13 +17,33 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const url = new URL(request.url);
     if (request.method !== 'POST' || url.pathname !== '/v1/messages')
-      return new Response(JSON.stringify({ error: 'Not found' }), { status: 404 });
+      return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: cors });
+
     const body = await request.text();
+    const parsed = JSON.parse(body);
+    const isStream = parsed.stream === true;
+
     const upstream = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
       body,
     });
-    return new Response(await upstream.text(), { status: upstream.status, headers: { ...cors, 'Content-Type': 'application/json' } });
+
+    if (isStream) {
+      // Stream the SSE response through directly
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: { ...cors, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+      });
+    }
+
+    return new Response(await upstream.text(), {
+      status: upstream.status,
+      headers: { ...cors, 'Content-Type': 'application/json' },
+    });
   },
 };
