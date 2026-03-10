@@ -202,6 +202,15 @@ function execToolOnPage(name, input) {
     const reqId = ++_toolReqId;
     _toolPending[reqId] = { resolve };
     setTimeout(() => { if (_toolPending[reqId]) { delete _toolPending[reqId]; resolve({ error: 'Content script timeout' }); } }, 10000);
+
+    // Hub tools need HUB_EXEC with execution metadata
+    if (name.startsWith('hub_')) {
+      const hubTool = hubToolDefs.find(t => t.name === name);
+      if (hubTool && hubTool._execution) {
+        browser.runtime.sendMessage({ type: 'HUB_EXEC', reqId, name, input, execution: hubTool._execution });
+        return;
+      }
+    }
     browser.runtime.sendMessage({ type: 'TOOL_EXEC', reqId, name, input });
   });
 }
