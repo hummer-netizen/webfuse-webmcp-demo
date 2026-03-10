@@ -47,7 +47,7 @@ function getSystem() {
 }
 
 function getTools() {
-  return [...BASE_TOOLS, ...hubToolDefs];
+  return [...hubToolDefs, ...BASE_TOOLS];
 }
 
 // ── UI helpers ─────────────────────────────────────────────────────────────
