@@ -19,8 +19,8 @@
     "default_popup": "popup.html"
   },
   "host_permissions": [
-    "https://proxy.webfuse.it/*",
-    "https://www.webmcp-hub.com/*",
+    "https://*.webfuse.it/*",
+    "https://*.webmcp-hub.com/*",
     "https://webmcp-hub.com/*"
   ]
 }
