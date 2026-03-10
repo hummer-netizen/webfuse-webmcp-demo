@@ -58,6 +58,29 @@ browser.runtime.onMessage.addListener((message, sender) => {
       browser.runtime.sendMessage({ type: 'HUB_TOOLS_UPDATED', domain, configs });
     });
 
+  } else if (message?.type === 'GET_HUB_STATUS') {
+    // Sidepanel asks for current hub state
+    // Get the active tab domain and return cached or fresh hub configs
+    (async () => {
+      try {
+        const tabs = await browser.webfuseSession.getTabs();
+        const active = tabs.find(t => t.active) || tabs[0];
+        if (active && active.url) {
+          const domain = new URL(active.url).hostname;
+          if (domain) {
+            const configs = await lookupHub(domain);
+            browser.runtime.sendMessage({ type: 'HUB_TOOLS_UPDATED', domain, configs });
+          }
+        }
+      } catch (e) {
+        // Session API might not be available, try using lastDomain
+        if (lastDomain) {
+          const configs = await lookupHub(lastDomain);
+          browser.runtime.sendMessage({ type: 'HUB_TOOLS_UPDATED', domain: lastDomain, configs });
+        }
+      }
+    })();
+
   } else if (message?.type === 'HUB_EXEC') {
     // Sidepanel asks content script to execute a hub tool
     const { reqId, name, input, execution } = message;

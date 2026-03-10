@@ -202,6 +202,14 @@ function updateWelcome(domain, tools) {
 // Show default welcome on load
 updateWelcome('', []);
 
+// Actively request hub status from background (don't rely only on push)
+function requestHubStatus() {
+  browser.runtime.sendMessage({ type: 'GET_HUB_STATUS' });
+}
+requestHubStatus();
+// Re-check every 3 seconds for domain changes
+setInterval(requestHubStatus, 3000);
+
 // ── Message handling ───────────────────────────────────────────────────────
 let _toolPending = {};
 let _toolReqId = 0;
