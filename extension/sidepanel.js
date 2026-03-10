@@ -224,12 +224,12 @@ browser.runtime.onMessage.addListener((message) => {
   }
 
   if (message?.type === 'HUB_TOOLS_UPDATED') {
-    currentDomain = message.domain;
+    const newDomain = message.domain;
     const configs = message.configs || [];
-    hubToolDefs = [];
+    const newHubTools = [];
     for (const config of configs) {
       for (const tool of (config.tools || [])) {
-        hubToolDefs.push({
+        newHubTools.push({
           name: `hub_${tool.name}`,
           description: `[WebMCP Hub] ${tool.description || tool.name}`,
           input_schema: tool.inputSchema || { type: 'object', properties: {} },
@@ -237,7 +237,25 @@ browser.runtime.onMessage.addListener((message) => {
         });
       }
     }
-    updateWelcome(currentDomain, hubToolDefs);
+
+    // Only update if domain actually changed
+    if (newDomain !== currentDomain || newHubTools.length !== hubToolDefs.length) {
+      currentDomain = newDomain;
+      hubToolDefs = newHubTools;
+      updateWelcome(currentDomain, hubToolDefs);
+
+      // If welcome is hidden (agent already running), show hub tools as chat message
+      if (welcomeEl.style.display === 'none' && hubToolDefs.length > 0) {
+        const d = document.createElement('div');
+        d.className = 'msg hub-inline';
+        d.innerHTML = '<div style="font-size:12px;color:#60a5fa;margin-bottom:4px;">🌐 ' +
+          hubToolDefs.length + ' WebMCP Hub tools loaded for <strong>' + currentDomain + '</strong></div>' +
+          hubToolDefs.map(t => '<span class="action-pill hub" style="margin:1px 2px;font-size:10px;">' + t.name + '</span>').join('') +
+          '<div style="font-size:10px;color:#555;margin-top:4px;">from webmcp-hub.com</div>';
+        messagesEl.appendChild(d);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+    }
   }
 
   // Claude streaming
