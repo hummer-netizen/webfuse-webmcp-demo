@@ -86,6 +86,17 @@ function updateHubBadge() {
   }
 }
 
+// ── Hub tools display ───────────────────────────────────────────────────────
+function addHubToolsMsg(domain, tools) {
+  const d = document.createElement('div');
+  d.className = 'msg hub-tools-list';
+  d.innerHTML = `<div class="hub-header">🌐 ${tools.length} community tools for <strong>${domain}</strong></div>` +
+    tools.map(t => `<span class="hub-tool-tag">${t.name}</span>`).join('') +
+    `<div class="hub-source">from webmcp-hub.com</div>`;
+  messagesEl.appendChild(d);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 // ── Suggestions ────────────────────────────────────────────────────────────
 const SUGGESTIONS = ['🔍 Search for "AI agents"', '📄 Summarise this page', '🔗 Click the first link', '📰 List the section headings'];
 function showSuggestions() {
@@ -134,7 +145,8 @@ browser.runtime.onMessage.addListener((message) => {
     }
     updateHubBadge();
     if (hubToolDefs.length > 0) {
-      addMsg('system', `🌐 ${hubToolDefs.length} community tools loaded for ${currentDomain} (from webmcp-hub.com)`);
+      const toolList = hubToolDefs.map(t => t.name).join(', ');
+      addHubToolsMsg(currentDomain, hubToolDefs);
     }
   }
 

@@ -94,3 +94,34 @@ body.active {
 .action-pill.hub {
   background: #1a2e2a; color: #34d399; border: 1px solid rgba(52,211,153,0.3);
 }
+
+/* Hub tools list */
+.hub-tools-list {
+  background: rgba(52,211,153,0.05);
+  border: 1px solid rgba(52,211,153,0.2);
+  border-radius: 10px;
+  padding: 10px 12px;
+  max-width: 100%;
+  align-self: stretch;
+}
+.hub-header {
+  font-size: 12px;
+  color: #34d399;
+  margin-bottom: 6px;
+}
+.hub-tool-tag {
+  display: inline-block;
+  background: rgba(52,211,153,0.1);
+  border: 1px solid rgba(52,211,153,0.25);
+  color: #34d399;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin: 2px 3px 2px 0;
+}
+.hub-source {
+  font-size: 10px;
+  color: #555;
+  margin-top: 6px;
+}
