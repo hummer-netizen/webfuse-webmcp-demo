@@ -13,15 +13,20 @@ const MAX_BODY_TEXT = 1200;
 let currentHubConfigs = [];
 let currentHubTools = [];
 
-// On page load: ask background to look up hub configs for this domain
+// On page load: ask background for the real domain (URLs are rewritten by the Webfuse proxy)
 const hubReqId = 'hub_' + Date.now();
-browser.runtime.sendMessage({ type: 'HUB_LOOKUP', reqId: hubReqId, domain: location.hostname });
+browser.runtime.sendMessage({ type: 'GET_REAL_DOMAIN', reqId: hubReqId });
 
 // Listen for tool requests
 browser.runtime.onMessage.addListener((message) => {
   if (message?.type === 'TOOL_EXEC') {
     const result = execTool(message.name, message.input || {});
     browser.runtime.sendMessage({ type: 'TOOL_RESULT', reqId: message.reqId, result });
+  }
+  if (message?.type === 'REAL_DOMAIN' && message.reqId === hubReqId) {
+    // Got the real domain from Session API, now look up hub configs
+    console.log('[Webfuse] Real domain:', message.domain, '(proxied as:', location.hostname + ')');
+    browser.runtime.sendMessage({ type: 'HUB_LOOKUP', reqId: hubReqId, domain: message.domain });
   }
   if (message?.type === 'HUB_RESULT' && message.reqId === hubReqId) {
     currentHubConfigs = message.configs || [];
