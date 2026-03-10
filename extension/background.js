@@ -15,7 +15,7 @@ const hubCache = {};
 browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 browser.sidePanel.open();
 
-browser.runtime.onMessage.addListener(async (message, sender) => {
+browser.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === 'CLAUDE_API') {
     const { reqId, payload } = message;
     payload.stream = true;
@@ -36,30 +36,6 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
       // Also notify sidepanel
       browser.runtime.sendMessage({ type: 'HUB_TOOLS_UPDATED', domain, configs });
     });
-
-  } else if (message?.type === 'GET_REAL_DOMAIN') {
-    // Use Session API to get the real (non-proxied) URL of the current tab
-    const { reqId } = message;
-    try {
-      const tabs = await browser.webfuseSession.getTabs();
-      const activeTab = tabs.find(t => t.active) || tabs[0];
-      if (activeTab && activeTab.url) {
-        const domain = new URL(activeTab.url).hostname;
-        browser.runtime.sendMessage({ type: 'REAL_DOMAIN', reqId, domain });
-        // Also trigger hub lookup
-        lookupHub(domain).then(configs => {
-          browser.runtime.sendMessage({ type: 'HUB_RESULT', reqId, configs });
-          browser.runtime.sendMessage({ type: 'HUB_TOOLS_UPDATED', domain, configs });
-        });
-      } else {
-        // Fallback: try to extract from proxied hostname
-        browser.runtime.sendMessage({ type: 'REAL_DOMAIN', reqId, domain: 'unknown' });
-      }
-    } catch (e) {
-      console.error('[Hub] Failed to get real domain:', e.message);
-      // Fallback to proxied hostname
-      browser.runtime.sendMessage({ type: 'REAL_DOMAIN', reqId, domain: 'unknown' });
-    }
 
   } else if (message?.type === 'HUB_EXEC') {
     // Sidepanel asks content script to execute a hub tool
