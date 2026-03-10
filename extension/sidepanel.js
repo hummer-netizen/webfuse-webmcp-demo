@@ -1,7 +1,6 @@
 /**
  * sidepanel.js — Persistent agent chat UI + WebMCP Hub integration
- * Communicates with background.js for API calls, and content.js for page tools.
- * Dynamically adds hub tools when available for the current domain.
+ * Contextual welcome per domain, tool descriptions, guided prompts.
  */
 
 const MODEL = 'claude-sonnet-4-6';
@@ -11,17 +10,75 @@ const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('send');
 const statusEl = document.getElementById('status');
+const welcomeEl = document.getElementById('welcome');
+const siteContextEl = document.getElementById('site-context');
+const toolListEl = document.getElementById('tool-list');
 
 let running = false;
 
-// Base tools (always available)
+// ── Per-site context configs ───────────────────────────────────────────────
+// These provide friendly prompts and suggestions per domain
+const SITE_CONTEXTS = {
+  'booking.com': {
+    name: 'Booking.com',
+    prompt: 'You\'re on Booking.com. Where and when would you like to go? Try something like "Find me a hotel in Amsterdam for next weekend."',
+    suggestions: [
+      '🏨 Find a hotel in Amsterdam for next weekend',
+      '🏖️ Search beach resorts in Barcelona, 2 adults',
+      '💰 Cheapest hotels in Paris under €100',
+    ],
+  },
+  'www.booking.com': {
+    name: 'Booking.com',
+    prompt: 'You\'re on Booking.com. Where and when would you like to go? Try something like "Find me a hotel in Amsterdam for next weekend."',
+    suggestions: [
+      '🏨 Find a hotel in Amsterdam for next weekend',
+      '🏖️ Search beach resorts in Barcelona, 2 adults',
+      '💰 Cheapest hotels in Paris under €100',
+    ],
+  },
+  'x.com': {
+    name: 'X (Twitter)',
+    prompt: 'You\'re on X. What would you like to do? Try "Post about WebMCP" or "Like the first post in my feed."',
+    suggestions: [
+      '📝 Post about something interesting',
+      '❤️ Like the top post in my feed',
+      '🔍 Search for "WebMCP"',
+    ],
+  },
+  'amazon.com': {
+    name: 'Amazon',
+    prompt: 'You\'re on Amazon. What are you looking for? Try "Search for wireless headphones under $50."',
+    suggestions: [
+      '🎧 Search for wireless headphones',
+      '📦 Find the best-rated coffee maker',
+    ],
+  },
+  'youtube.com': {
+    name: 'YouTube',
+    prompt: 'You\'re on YouTube. What do you want to watch? Try "Search for WebMCP demo."',
+    suggestions: [
+      '🎬 Search for AI agent demos',
+      '📺 Find the latest tech news',
+    ],
+  },
+};
+
+const DEFAULT_SUGGESTIONS = [
+  '🔍 Search for something on this page',
+  '📄 Summarize this page',
+  '🔗 Click the first link',
+  '📰 List the headings',
+];
+
+// ── Base tools (always available) ──────────────────────────────────────────
 const BASE_TOOLS = [
-  { name: 'snapshot', description: 'Get page state: URL, title, headings, visible text, interactive elements with CSS selectors. Also shows available hub tools if any.', input_schema: { type: 'object', properties: {}, required: [] } },
+  { name: 'snapshot', description: 'Get page state: URL, title, text, and interactive elements with selectors.', input_schema: { type: 'object', properties: {}, required: [] } },
   { name: 'click', description: 'Click an element by CSS selector.', input_schema: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] } },
-  { name: 'fill', description: 'Fill a form field with a value.', input_schema: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'value'] } },
-  { name: 'navigate', description: 'Navigate to a URL.', input_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
-  { name: 'scroll', description: 'Scroll the page up or down.', input_schema: { type: 'object', properties: { direction: { type: 'string', enum: ['up', 'down'] } }, required: ['direction'] } },
-  { name: 'done', description: 'Signal task complete.', input_schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } },
+  { name: 'fill', description: 'Type into a form field.', input_schema: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'value'] } },
+  { name: 'navigate', description: 'Go to a URL.', input_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
+  { name: 'scroll', description: 'Scroll up or down.', input_schema: { type: 'object', properties: { direction: { type: 'string', enum: ['up', 'down'] } }, required: ['direction'] } },
+  { name: 'done', description: 'Task complete.', input_schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } },
 ];
 
 // Hub tools (added dynamically per domain)
@@ -40,13 +97,14 @@ Rules:
 
 const HUB_SYSTEM_ADDON = `
 
-IMPORTANT: This page has community-contributed WebMCP Hub tools available (prefixed with hub_). These are pre-mapped to specific UI elements and are faster and more reliable than generic click/fill. PREFER hub tools when they match your intent. Fall back to generic tools only when no hub tool fits.`;
+IMPORTANT: This page has community-contributed WebMCP Hub tools available (prefixed with hub_). These are pre-mapped to specific UI elements and are faster and more reliable than generic click/fill. ALWAYS PREFER hub tools when they match your intent. Fall back to generic tools only when no hub tool fits.`;
 
 function getSystem() {
   return hubToolDefs.length > 0 ? BASE_SYSTEM + HUB_SYSTEM_ADDON : BASE_SYSTEM;
 }
 
 function getTools() {
+  // Hub tools first so Claude prefers them
   return [...hubToolDefs, ...BASE_TOOLS];
 }
 
@@ -74,45 +132,75 @@ function setActive(on) {
   statusEl.classList.toggle('thinking', on);
 }
 
-// ── Hub tools notification ─────────────────────────────────────────────────
-function updateHubBadge() {
-  const badge = document.getElementById('hub-badge');
-  if (!badge) return;
-  if (hubToolDefs.length > 0) {
-    badge.textContent = `🌐 ${hubToolDefs.length} hub tools`;
-    badge.style.display = 'inline-block';
-  } else {
-    badge.style.display = 'none';
+// ── Welcome panel updates ──────────────────────────────────────────────────
+function updateWelcome(domain, tools) {
+  // Site context
+  const ctx = SITE_CONTEXTS[domain];
+  if (ctx) {
+    siteContextEl.innerHTML = `<div class="site-name">📍 ${ctx.name}</div><div class="site-prompt">${ctx.prompt}</div>`;
+    siteContextEl.classList.add('visible');
+  } else if (domain) {
+    siteContextEl.innerHTML = `<div class="site-name">📍 ${domain}</div><div class="site-prompt">Tell the agent what you'd like to do on this page.</div>`;
+    siteContextEl.classList.add('visible');
   }
-}
 
-// ── Hub tools display ───────────────────────────────────────────────────────
-function addHubToolsMsg(domain, tools) {
-  const d = document.createElement('div');
-  d.className = 'msg hub-tools-list';
-  d.innerHTML = `<div class="hub-header">🌐 ${tools.length} community tools for <strong>${domain}</strong></div>` +
-    tools.map(t => `<span class="hub-tool-tag">${t.name}</span>`).join('') +
-    `<div class="hub-source">from webmcp-hub.com</div>`;
-  messagesEl.appendChild(d);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-}
+  // Tool list
+  toolListEl.innerHTML = '';
 
-// ── Suggestions ────────────────────────────────────────────────────────────
-const SUGGESTIONS = ['🔍 Search for "AI agents"', '📄 Summarise this page', '🔗 Click the first link', '📰 List the section headings'];
-function showSuggestions() {
+  // Hub tools first (blue)
+  for (const t of tools) {
+    const item = document.createElement('div');
+    item.className = 'tool-item';
+    const cleanDesc = t.description.replace(/^\[WebMCP Hub\]\s*/, '');
+    item.innerHTML = `
+      <div class="tool-icon hub">H</div>
+      <div>
+        <div class="tool-name hub">${t.name}</div>
+        <div class="tool-desc">${cleanDesc}</div>
+      </div>`;
+    toolListEl.appendChild(item);
+  }
+
+  // Base tools (purple, compact)
+  if (tools.length > 0) {
+    const sep = document.createElement('div');
+    sep.style.cssText = 'font-size:10px; color:#555; margin: 6px 0 2px 0;';
+    sep.textContent = `+ ${BASE_TOOLS.length} base tools (snapshot, click, fill, navigate, scroll)`;
+    toolListEl.appendChild(sep);
+  } else {
+    for (const t of BASE_TOOLS) {
+      const item = document.createElement('div');
+      item.className = 'tool-item';
+      item.innerHTML = `
+        <div class="tool-icon base">W</div>
+        <div>
+          <div class="tool-name base">${t.name}</div>
+          <div class="tool-desc">${t.description}</div>
+        </div>`;
+      toolListEl.appendChild(item);
+    }
+  }
+
+  // Suggestions
+  const suggestions = ctx?.suggestions || DEFAULT_SUGGESTIONS;
   const wrap = document.createElement('div');
   wrap.className = 'suggestions';
-  SUGGESTIONS.forEach(s => {
+  suggestions.forEach(s => {
     const btn = document.createElement('button');
     btn.className = 'suggestion';
     btn.textContent = s;
-    btn.onclick = () => { wrap.remove(); inputEl.value = s.replace(/^[^\w]+/, ''); sendBtn.click(); };
+    btn.onclick = () => {
+      welcomeEl.style.display = 'none';
+      inputEl.value = s.replace(/^[^\w]+/, '');
+      sendBtn.click();
+    };
     wrap.appendChild(btn);
   });
-  messagesEl.appendChild(wrap);
-  addMsg('system', 'Powered by Webfuse + Claude + WebMCP Hub · webfuse.com');
+  toolListEl.appendChild(wrap);
 }
-showSuggestions();
+
+// Show default welcome on load
+updateWelcome('', []);
 
 // ── Message handling ───────────────────────────────────────────────────────
 let _toolPending = {};
@@ -121,14 +209,12 @@ let _claudePending = {};
 let _claudeReqId = 0;
 
 browser.runtime.onMessage.addListener((message) => {
-  // Tool results from content script
   if (message?.type === 'TOOL_RESULT' && _toolPending[message.reqId]) {
     const { resolve } = _toolPending[message.reqId];
     delete _toolPending[message.reqId];
     resolve(message.result);
   }
 
-  // Hub tools updated for new domain
   if (message?.type === 'HUB_TOOLS_UPDATED') {
     currentDomain = message.domain;
     const configs = message.configs || [];
@@ -143,11 +229,7 @@ browser.runtime.onMessage.addListener((message) => {
         });
       }
     }
-    updateHubBadge();
-    if (hubToolDefs.length > 0) {
-      const toolList = hubToolDefs.map(t => t.name).join(', ');
-      addHubToolsMsg(currentDomain, hubToolDefs);
-    }
+    updateWelcome(currentDomain, hubToolDefs);
   }
 
   // Claude streaming
@@ -203,7 +285,6 @@ function execToolOnPage(name, input) {
     _toolPending[reqId] = { resolve };
     setTimeout(() => { if (_toolPending[reqId]) { delete _toolPending[reqId]; resolve({ error: 'Content script timeout' }); } }, 10000);
 
-    // Hub tools need HUB_EXEC with execution metadata
     if (name.startsWith('hub_')) {
       const hubTool = hubToolDefs.find(t => t.name === name);
       if (hubTool && hubTool._execution) {
@@ -225,7 +306,6 @@ function callClaude(messages, onText) {
     };
     setTimeout(() => { if (_claudePending[reqId]) { delete _claudePending[reqId]; reject(new Error('Timeout (30s)')); } }, 30000);
 
-    // Build tools list: base + hub (strip _execution from hub tools before sending to API)
     const tools = getTools().map(t => {
       const { _execution, ...rest } = t;
       return rest;
@@ -244,6 +324,7 @@ async function run(goal) {
   sendBtn.disabled = true;
   inputEl.disabled = true;
   setActive(true);
+  welcomeEl.style.display = 'none';
   const history = [{ role: 'user', content: goal }];
   addMsg('user', goal);
 

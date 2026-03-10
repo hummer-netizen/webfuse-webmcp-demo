@@ -8,11 +8,33 @@
 </head>
 <body>
   <div class="header">
-    <span class="title">✨ Webfuse Agent</span>
-    <span class="hub-badge" id="hub-badge" style="display:none"></span>
-    <span class="status" id="status">ready</span>
+    <div class="header-top">
+      <span class="title">✨ Webfuse Agent</span>
+      <span class="status" id="status">ready</span>
+    </div>
+    <div class="header-links">
+      <a href="https://webfuse.com" target="_blank">Webfuse</a>
+      <span class="sep">·</span>
+      <a href="https://webmcp-hub.com" target="_blank">WebMCP Hub</a>
+      <span class="sep">·</span>
+      <a href="https://dev.webfuse.com" target="_blank">Docs</a>
+    </div>
   </div>
+
+  <div id="welcome" class="welcome">
+    <div class="welcome-title">Web automation, powered by AI</div>
+    <p class="welcome-desc">
+      This agent can see and control the page you're browsing. It uses
+      <a href="https://webfuse.com" target="_blank">Webfuse</a> for structured page access
+      and community-contributed tools from the
+      <a href="https://webmcp-hub.com" target="_blank">WebMCP Hub</a>.
+    </p>
+    <div id="site-context" class="site-context"></div>
+    <div id="tool-list" class="tool-list"></div>
+  </div>
+
   <div class="messages" id="messages"></div>
+
   <div class="input-row">
     <input id="input" type="text" placeholder="Tell the agent what to do…" autofocus />
     <button id="send">Go</button>
