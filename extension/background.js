@@ -6,7 +6,7 @@
  * Opens sidepanel automatically on session start.
  */
 const PROXY_URL = 'https://proxy.webfuse.it';
-const HUB_API = 'https://www.webmcp-hub.com/api/configs/lookup';
+const HUB_API = 'https://proxy.webfuse.it/hub/lookup';
 
 // Cache hub configs per domain to avoid repeated lookups
 const hubCache = {};
