@@ -1,14 +1,18 @@
 /**
- * background.js — Message hub
+ * background.js — Message hub + WebMCP Hub integration
  * Routes: sidepanel ↔ content script (tool calls)
  *         sidepanel → Anthropic API (Claude calls, streamed)
+ *         content.js → WebMCP Hub API (config lookup on navigation)
  * Opens sidepanel automatically on session start.
  */
 const PROXY_URL = 'https://proxy.webfuse.it';
+const HUB_API = 'https://www.webmcp-hub.com/api/configs/lookup';
 
-// Auto-open sidepanel on every new tab/navigation
+// Cache hub configs per domain to avoid repeated lookups
+const hubCache = {};
+
+// Auto-open sidepanel
 browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-// Open immediately for all tabs
 browser.sidePanel.open();
 
 browser.runtime.onMessage.addListener((message, sender) => {
@@ -16,13 +20,45 @@ browser.runtime.onMessage.addListener((message, sender) => {
     const { reqId, payload } = message;
     payload.stream = true;
     streamClaude(reqId, payload, sender);
+
   } else if (message?.type === 'TOOL_EXEC') {
     const { reqId, name, input } = message;
     browser.tabs.sendMessage(null, { type: 'TOOL_EXEC', reqId, name, input });
+
   } else if (message?.type === 'TOOL_RESULT') {
     browser.runtime.sendMessage(message);
+
+  } else if (message?.type === 'HUB_LOOKUP') {
+    // Content script asks us to look up hub configs for a domain
+    const { reqId, domain } = message;
+    lookupHub(domain).then(configs => {
+      browser.runtime.sendMessage({ type: 'HUB_RESULT', reqId, configs });
+      // Also notify sidepanel
+      browser.runtime.sendMessage({ type: 'HUB_TOOLS_UPDATED', domain, configs });
+    });
+
+  } else if (message?.type === 'HUB_EXEC') {
+    // Sidepanel asks content script to execute a hub tool
+    const { reqId, name, input, execution } = message;
+    browser.tabs.sendMessage(null, { type: 'HUB_EXEC', reqId, name, input, execution });
   }
 });
+
+async function lookupHub(domain) {
+  if (hubCache[domain]) return hubCache[domain];
+  try {
+    const res = await fetch(`${HUB_API}?domain=${encodeURIComponent(domain)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const configs = data.configs || [];
+    hubCache[domain] = configs;
+    console.log(`[Hub] ${domain}: ${configs.length} configs, ${configs.reduce((n, c) => n + (c.tools?.length || 0), 0)} tools`);
+    return configs;
+  } catch (e) {
+    console.error('[Hub] Lookup failed:', e.message);
+    return [];
+  }
+}
 
 async function streamClaude(reqId, payload, sender, attempt = 0) {
   try {
@@ -62,4 +98,4 @@ async function streamClaude(reqId, payload, sender, attempt = 0) {
   }
 }
 
-console.log('[Webfuse WebMCP Demo] Background script active (sidepanel + streaming)');
+console.log('[Webfuse WebMCP Demo] Background v3.0 — Hub integration + streaming');

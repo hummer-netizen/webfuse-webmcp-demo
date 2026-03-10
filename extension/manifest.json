@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "version": "2.0",
+  "version": "3.0",
   "name": "WebMCP Bridge Demo",
-  "description": "AI agent that sees and controls any website via Webfuse — WebMCP-grade access today.",
+  "description": "AI agent with community-contributed WebMCP Hub tools + Webfuse proxy fallback. Real browser, real session.",
   "background": {
     "service_worker": "background.js"
   },
@@ -17,5 +17,10 @@
   },
   "action": {
     "default_popup": "popup.html"
-  }
+  },
+  "host_permissions": [
+    "https://proxy.webfuse.it/*",
+    "https://www.webmcp-hub.com/*",
+    "https://webmcp-hub.com/*"
+  ]
 }

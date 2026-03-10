@@ -1,10 +1,10 @@
 /**
- * sidepanel.js — Persistent agent chat UI
+ * sidepanel.js — Persistent agent chat UI + WebMCP Hub integration
  * Communicates with background.js for API calls, and content.js for page tools.
- * Survives navigation because sidepanel is a separate extension context.
+ * Dynamically adds hub tools when available for the current domain.
  */
 
-const MODEL = 'claude-3-haiku-20240307';
+const MODEL = 'claude-sonnet-4-6';
 const MAX_TURNS = 10;
 
 const messagesEl = document.getElementById('messages');
@@ -14,8 +14,9 @@ const statusEl = document.getElementById('status');
 
 let running = false;
 
-const TOOLS = [
-  { name: 'snapshot', description: 'Get page state: URL, title, headings, visible text, interactive elements with CSS selectors.', input_schema: { type: 'object', properties: {}, required: [] } },
+// Base tools (always available)
+const BASE_TOOLS = [
+  { name: 'snapshot', description: 'Get page state: URL, title, headings, visible text, interactive elements with CSS selectors. Also shows available hub tools if any.', input_schema: { type: 'object', properties: {}, required: [] } },
   { name: 'click', description: 'Click an element by CSS selector.', input_schema: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] } },
   { name: 'fill', description: 'Fill a form field with a value.', input_schema: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'value'] } },
   { name: 'navigate', description: 'Navigate to a URL.', input_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
@@ -23,17 +24,31 @@ const TOOLS = [
   { name: 'done', description: 'Signal task complete.', input_schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } },
 ];
 
-const SYSTEM = `You are a web automation agent inside a Webfuse-proxied browser session. You have direct, structured access to the live page — real auth, real cookies, real state.
+// Hub tools (added dynamically per domain)
+let hubToolDefs = [];
+let currentDomain = '';
 
-Tools: snapshot, click, fill, navigate, scroll, done.
+const BASE_SYSTEM = `You are a web automation agent inside a Webfuse-proxied browser session. You have direct, structured access to the live page. Real auth, real cookies, real state.
 
 Rules:
 1. Start every task with snapshot()
 2. Prefer stable selectors: id > data-testid > aria-label > name > positional
 3. After each action, snapshot again to verify the result
 4. On failure, try an alternative selector or approach before giving up
-5. Be efficient — don't over-explain, just act
+5. Be efficient. Act, don't over-explain.
 6. Call done() with a one-sentence summary when the task is complete`;
+
+const HUB_SYSTEM_ADDON = `
+
+IMPORTANT: This page has community-contributed WebMCP Hub tools available (prefixed with hub_). These are pre-mapped to specific UI elements and are faster and more reliable than generic click/fill. PREFER hub tools when they match your intent. Fall back to generic tools only when no hub tool fits.`;
+
+function getSystem() {
+  return hubToolDefs.length > 0 ? BASE_SYSTEM + HUB_SYSTEM_ADDON : BASE_SYSTEM;
+}
+
+function getTools() {
+  return [...BASE_TOOLS, ...hubToolDefs];
+}
 
 // ── UI helpers ─────────────────────────────────────────────────────────────
 function addMsg(role, text) {
@@ -48,7 +63,8 @@ function addAction(name, input) {
   const args = Object.entries(input).map(([k, v]) => `${k}="${String(v).slice(0, 30)}"`).join(', ');
   const d = document.createElement('div');
   d.className = 'msg thinking';
-  d.innerHTML = `<span class="action-pill">${name}(${args})</span>`;
+  const isHub = name.startsWith('hub_');
+  d.innerHTML = `<span class="action-pill ${isHub ? 'hub' : ''}">${isHub ? '🌐 ' : ''}${name}(${args})</span>`;
   messagesEl.appendChild(d);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -56,6 +72,18 @@ function setActive(on) {
   document.body.classList.toggle('active', on);
   statusEl.textContent = on ? 'working…' : 'ready';
   statusEl.classList.toggle('thinking', on);
+}
+
+// ── Hub tools notification ─────────────────────────────────────────────────
+function updateHubBadge() {
+  const badge = document.getElementById('hub-badge');
+  if (!badge) return;
+  if (hubToolDefs.length > 0) {
+    badge.textContent = `🌐 ${hubToolDefs.length} hub tools`;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
 }
 
 // ── Suggestions ────────────────────────────────────────────────────────────
@@ -71,21 +99,46 @@ function showSuggestions() {
     wrap.appendChild(btn);
   });
   messagesEl.appendChild(wrap);
-  addMsg('system', 'Powered by Webfuse + Claude · webfuse.com');
+  addMsg('system', 'Powered by Webfuse + Claude + WebMCP Hub · webfuse.com');
 }
 showSuggestions();
 
-// ── Talk to content script (page tools) via background relay ───────────────
+// ── Message handling ───────────────────────────────────────────────────────
 let _toolPending = {};
 let _toolReqId = 0;
+let _claudePending = {};
+let _claudeReqId = 0;
 
 browser.runtime.onMessage.addListener((message) => {
+  // Tool results from content script
   if (message?.type === 'TOOL_RESULT' && _toolPending[message.reqId]) {
     const { resolve } = _toolPending[message.reqId];
     delete _toolPending[message.reqId];
     resolve(message.result);
   }
-  // Stream events from background
+
+  // Hub tools updated for new domain
+  if (message?.type === 'HUB_TOOLS_UPDATED') {
+    currentDomain = message.domain;
+    const configs = message.configs || [];
+    hubToolDefs = [];
+    for (const config of configs) {
+      for (const tool of (config.tools || [])) {
+        hubToolDefs.push({
+          name: `hub_${tool.name}`,
+          description: `[WebMCP Hub] ${tool.description || tool.name}`,
+          input_schema: tool.inputSchema || { type: 'object', properties: {} },
+          _execution: tool.execution,
+        });
+      }
+    }
+    updateHubBadge();
+    if (hubToolDefs.length > 0) {
+      addMsg('system', `🌐 ${hubToolDefs.length} community tools loaded for ${currentDomain} (from webmcp-hub.com)`);
+    }
+  }
+
+  // Claude streaming
   if (message?.type === 'CLAUDE_STREAM' || message?.type === 'CLAUDE_STREAM_END' || message?.type === 'CLAUDE_RESPONSE') {
     const reqId = message.reqId;
     const pending = _claudePending[reqId];
@@ -141,10 +194,6 @@ function execToolOnPage(name, input) {
   });
 }
 
-// ── Claude API (via background) ────────────────────────────────────────────
-let _claudePending = {};
-let _claudeReqId = 0;
-
 function callClaude(messages, onText) {
   return new Promise((resolve, reject) => {
     const reqId = 'sp_' + (++_claudeReqId);
@@ -154,9 +203,16 @@ function callClaude(messages, onText) {
       currentTool: null, stopReason: null,
     };
     setTimeout(() => { if (_claudePending[reqId]) { delete _claudePending[reqId]; reject(new Error('Timeout (30s)')); } }, 30000);
+
+    // Build tools list: base + hub (strip _execution from hub tools before sending to API)
+    const tools = getTools().map(t => {
+      const { _execution, ...rest } = t;
+      return rest;
+    });
+
     browser.runtime.sendMessage({
       type: 'CLAUDE_API', reqId,
-      payload: { model: MODEL, max_tokens: 512, system: SYSTEM, tools: TOOLS, messages }
+      payload: { model: MODEL, max_tokens: 1024, system: getSystem(), tools, messages }
     });
   });
 }
@@ -200,10 +256,8 @@ async function run(goal) {
       const r = await execToolOnPage(name, input);
       if (name === 'navigate') {
         results.push({ type: 'tool_result', tool_use_id: id, content: JSON.stringify(r).slice(0, 2000) });
-        // Wait for page to load after navigation
         addMsg('system', '⏳ Navigating…');
         await new Promise(r => setTimeout(r, 3000));
-        done = false; // continue the loop — content script will re-inject
         break;
       }
       results.push({ type: 'tool_result', tool_use_id: id, content: JSON.stringify(r).slice(0, 2000) });
