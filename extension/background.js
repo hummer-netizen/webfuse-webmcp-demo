@@ -15,6 +15,27 @@ const hubCache = {};
 browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 browser.sidePanel.open();
 
+// Track current domain to detect navigation across sites
+let lastDomain = '';
+
+// Poll for domain changes (Webfuse virtual tabs may not fire standard nav events)
+setInterval(async () => {
+  try {
+    const tabs = await browser.webfuseSession.getTabs();
+    const active = tabs.find(t => t.active) || tabs[0];
+    if (active && active.url) {
+      const domain = new URL(active.url).hostname;
+      if (domain && domain !== lastDomain) {
+        lastDomain = domain;
+        console.log('[Hub] Domain changed to:', domain);
+        lookupHub(domain).then(configs => {
+          browser.runtime.sendMessage({ type: 'HUB_TOOLS_UPDATED', domain, configs });
+        });
+      }
+    }
+  } catch (_) {}
+}, 2000);
+
 browser.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === 'CLAUDE_API') {
     const { reqId, payload } = message;
