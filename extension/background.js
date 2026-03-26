@@ -5,8 +5,8 @@
  *         content.js → WebMCP Hub API (config lookup on navigation)
  * Opens sidepanel automatically on session start.
  */
-const PROXY_URL = 'https://proxy.webfuse.it';
-const HUB_API = 'https://proxy.webfuse.it/hub/lookup';
+const PROXY_URL = 'https://webmcp-demo.webfuse.it';
+const HUB_API = 'https://webmcp-demo.webfuse.it/hub/lookup';
 
 // Cache hub configs per domain to avoid repeated lookups
 const hubCache = {};

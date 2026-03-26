@@ -1,0 +1,15 @@
+[Unit]
+Description=WebMCP Demo Proxy (Anthropic API)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/deploy/projects/webfuse-webmcp-demo/proxy
+EnvironmentFile=/home/deploy/.env.dev
+Environment=PORT=8004
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

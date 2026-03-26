@@ -26,11 +26,42 @@ const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': allowed ? origin : 'null',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
       'Access-Control-Max-Age': '86400',
     });
     res.end();
+    return;
+  }
+
+  // Health check
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok' }));
+    return;
+  }
+
+  // WebMCP Hub lookup proxy (CORS bypass for extension)
+  if (req.method === 'GET' && req.url.startsWith('/hub/lookup')) {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    const domain = url.searchParams.get('domain');
+    if (!domain) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing domain param' }));
+      return;
+    }
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': allowed ? origin : 'null',
+      'Content-Type': 'application/json',
+    };
+    const hubReq = https.get(`https://www.webmcp-hub.com/api/configs/lookup?domain=${encodeURIComponent(domain)}`, (hubRes) => {
+      res.writeHead(hubRes.statusCode, corsHeaders);
+      hubRes.pipe(res);
+    });
+    hubReq.on('error', (e) => {
+      res.writeHead(502, corsHeaders);
+      res.end(JSON.stringify({ error: e.message }));
+    });
     return;
   }
 
