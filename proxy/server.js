@@ -93,18 +93,21 @@ const server = http.createServer((req, res) => {
       },
     };
 
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': allowed ? origin : 'null',
-      'Content-Type': 'application/json',
-    };
-
     const proxyReq = https.request(options, (proxyRes) => {
-      res.writeHead(proxyRes.statusCode, { ...corsHeaders });
+      // Forward the upstream Content-Type (text/event-stream for streaming, application/json otherwise)
+      const contentType = proxyRes.headers['content-type'] || 'application/json';
+      res.writeHead(proxyRes.statusCode, {
+        'Access-Control-Allow-Origin': allowed ? origin : 'null',
+        'Content-Type': contentType,
+      });
       proxyRes.pipe(res);
     });
 
     proxyReq.on('error', (e) => {
-      res.writeHead(502, corsHeaders);
+      res.writeHead(502, {
+        'Access-Control-Allow-Origin': allowed ? origin : 'null',
+        'Content-Type': 'application/json',
+      });
       res.end(JSON.stringify({ error: e.message }));
     });
 
